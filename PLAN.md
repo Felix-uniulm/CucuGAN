@@ -141,9 +141,9 @@ Konkret heißt das:
 ## 3. Vorgehen in Phasen
 
 ### Phase 0: Setup
-- [ ] `git init`, `.gitignore` (`data/`, `checkpoints/`, `outputs/`, `.venv/`)
-- [ ] venv, `requirements.txt` (torch, torchvision, pillow, tqdm, matplotlib, tensorboard)
-- [ ] Ordnerstruktur anlegen
+- [x] `git init`, `.gitignore` (`data/`, `checkpoints/`, `outputs/`, `.venv/`)
+- [x] venv, `requirements.txt` (torch, torchvision, pillow, tqdm, matplotlib, tensorboard)
+- [x] Ordnerstruktur anlegen
 
 **Fertig, wenn:** `import torch` läuft und der erste Commit steht.
 
