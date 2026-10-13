@@ -1,4 +1,4 @@
-# Gurke-GAN: Projektplan
+# CucuGAN: Projektplan
 
 Ziel: Menschliche Gesichter mit einem selbst implementierten **CycleGAN** (PyTorch) in „gurkige“ Gesichter verwandeln. Trainiert wird auf zwei **ungepaarten** Datensätzen: Gesichter (Domäne A) und Gurken (Domäne B).
 
