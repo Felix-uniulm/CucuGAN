@@ -170,14 +170,17 @@ Ergebnis `data/processed/128/` (Herkunft jedes Bildes in `manifest.csv`):
 **Fertig, wenn:** Ein Bildgrid beider Domänen sauber aussieht und die Bildzahlen pro Split dokumentiert sind.
 
 ### Phase 2: Dataset und DataLoader
-- [ ] `dataset.py` mit Normalisierung auf [-1, 1] und horizontalem Flip
+- [x] `dataset.py` mit Normalisierung auf [-1, 1] und horizontalem Flip (nur train); zu jedem Gesicht eine zufällige Gurke
+- [x] `utils.denormalize`; Selbsttest `python src/dataset.py` speichert einen Batch nach `outputs/batch_check.png`
 
 **Fertig, wenn:** Ein Batch geladen, zurücktransformiert und angezeigt werden kann.
 
 ### Phase 3: Modelle
-- [ ] Generator, Diskriminator, Init
-- [ ] Shape-Tests für 64, 128 und 256 px: G gibt dieselbe Shape zurück, D eine Patch-Karte (bei 128 px: 1×1×14×14)
-- [ ] Parameterzahlen mit Abschnitt 1.5 vergleichen
+- [x] Generator, Diskriminator, Init (`src/models.py`)
+- [x] Shape-Tests für 64, 128 und 256 px: G gibt dieselbe Shape zurück, D eine Patch-Karte (64: 6×6, 128: 14×14, 256: 30×30)
+- [x] Parameterzahlen mit Abschnitt 1.5 vergleichen: G 7.837.699, D 2.764.737 (exakt); mit 9 Res-Blöcken G 11.378.179
+
+Selbsttest: `python src/models.py`
 
 **Fertig, wenn:** Shapes und Parameterzahlen stimmen.
 
@@ -204,6 +207,7 @@ Ergebnis `data/processed/128/` (Herkunft jedes Bildes in `manifest.csv`):
 
 ### Phase 7: Experimente (je nur **eine** Änderung gegenüber der Baseline)
 Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der besten Variante sind dadurch leicht optimistisch; bei Bedarf später einen Teil von train als val abzweigen.
+- [ ] Falls Hintergrund und Haare mit vergurken: Hautmaske beim Anwenden (siehe Abschnitt 4, „Ganzes Bild wird Gurke“)
 
 - [ ] λ_cycle variieren (z. B. 5 oder 2): mehr Freiheit für Formänderungen
 - [ ] λ_identity variieren
@@ -223,6 +227,12 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
 - **Wenige Gurkenbilder:** Der Diskriminator kann overfitten. Gegenmittel sind Augmentierung bzw. DiffAugment.
 - **GAN-Losses sind keine Qualitätsmetrik:** Bewertet wird über Bilder und KID/FID.
 - **Mode Collapse / Instabilität:** Regelmäßig Bilder anschauen und Checkpoints behalten.
+- **Ganzes Bild wird Gurke:** Die Gurkenbilder sind reine Schalentextur (Quadrate ohne Hintergrund), die Gesichtsbilder enthalten Haare, Kleidung und Hintergrund. Der PatchGAN-Diskriminator bewertet ~70×70-Ausschnitte und hält alles für unecht, was nicht nach Schale aussieht. Der Generator wird deshalb vermutlich auch Hintergrund und Haare grün und genoppt machen; die Form bleibt über den Cycle-Loss erhalten. Gegenmittel, vom einfachsten zum aufwendigsten:
+  1. Erst die Baseline trainieren und ansehen.
+  2. Maske beim Anwenden: In `infer.py` nur die Hautbereiche aus dem Generator übernehmen, den Rest aus dem Original (Hautmaske über ein fertiges Face-Parsing-Modell).
+  3. Maske beim Training: Diskriminator-Loss nur auf Hautbereichen.
+  4. Modell mit eigener Aufmerksamkeit, z. B. U-GAT-IT (siehe Phase 7).
+- **Schachbrettmuster:** `ConvTranspose2d` im Decoder kann Checkerboard-Artefakte erzeugen. Falls sichtbar: durch Hochskalieren + normale Faltung ersetzen.
 
 ## 5. Weiterführende Literatur
 
