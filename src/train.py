@@ -22,6 +22,7 @@ import argparse
 import itertools
 import json
 import random
+import time
 from pathlib import Path
 
 import torch
@@ -60,6 +61,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pool-size", type=int, default=50, help="0 = kein Image-Pool")
     # Technik
     p.add_argument("--device", default="auto", help="auto, cpu, cuda, mps")
+    p.add_argument("--amp", action="store_true", help="Mixed Precision (nur CUDA): Faltungen in 16 Bit, deutlich schneller")
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--log-every", type=int, default=50, help="Losses alle N Schritte loggen")
@@ -103,6 +105,9 @@ def main() -> None:
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     device = pick_device(args.device)
+    use_amp = args.amp and device.type == "cuda"
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True    # schnellste Faltungs-Algorithmen für feste Bildgröße suchen
 
     # --- Daten -------------------------------------------------------------------------
     train_ds = UnpairedDataset(args.data, "train", args.max_images)
@@ -137,6 +142,10 @@ def main() -> None:
     gan_loss = nn.MSELoss()   # LSGAN: Abstand zum Sollwert 1 (echt) bzw. 0 (fake)
     l1 = nn.L1Loss()          # Cycle und Identity: mittlere absolute Pixelabweichung
     pool_A, pool_B = ImagePool(args.pool_size), ImagePool(args.pool_size)
+    # Mixed Precision: autocast wählt pro Operation 16 oder 32 Bit; der GradScaler vergrößert den Loss
+    # vor backward(), damit kleine Gradienten in 16 Bit nicht zu 0 werden. Ohne --amp tun beide nichts.
+    autocast = lambda: torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp)  # noqa: E731
+    scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
 
     start_epoch, step = 0, 0
     if args.resume:
@@ -147,6 +156,8 @@ def main() -> None:
         opt_D.load_state_dict(ckpt["opt_D"])
         sched_G.load_state_dict(ckpt["sched_G"])
         sched_D.load_state_dict(ckpt["sched_D"])
+        if "scaler" in ckpt:
+            scaler.load_state_dict(ckpt["scaler"])
         start_epoch, step = ckpt["epoch"] + 1, ckpt["step"]
         print(f"Fortgesetzt ab Epoche {start_epoch + 1}")
 
@@ -160,6 +171,7 @@ def main() -> None:
     # --- Training ----------------------------------------------------------------------
     for epoch in range(start_epoch, total_epochs):
         running: dict[str, float] = {}
+        t_epoch = time.time()
         for batch in tqdm(loader, desc=f"Epoche {epoch + 1}/{total_epochs}", leave=False):
             real_A = batch["A"].to(device, non_blocking=True)
             real_B = batch["B"].to(device, non_blocking=True)
@@ -168,36 +180,39 @@ def main() -> None:
             set_requires_grad([D_A, D_B], False)
             opt_G.zero_grad(set_to_none=True)
 
-            fake_B = G_AB(real_A)                     # Gesicht -> Gurke
-            rec_A = G_BA(fake_B)                      # ... -> wieder Gesicht
-            fake_A = G_BA(real_B)                     # Gurke -> Gesicht
-            rec_B = G_AB(fake_A)                      # ... -> wieder Gurke
+            with autocast():
+                fake_B = G_AB(real_A)                 # Gesicht -> Gurke
+                rec_A = G_BA(fake_B)                  # ... -> wieder Gesicht
+                fake_A = G_BA(real_B)                 # Gurke -> Gesicht
+                rec_B = G_AB(fake_A)                  # ... -> wieder Gurke
 
-            pred_fake_B = D_B(fake_B)                 # Generator will, dass D "echt" (1) sagt
-            pred_fake_A = D_A(fake_A)
-            loss_gan = gan_loss(pred_fake_B, torch.ones_like(pred_fake_B)) \
-                + gan_loss(pred_fake_A, torch.ones_like(pred_fake_A))
-            loss_cycle = args.lambda_cycle * (l1(rec_A, real_A) + l1(rec_B, real_B))
-            if args.lambda_identity > 0:              # echte Gurke in G_AB soll Gurke bleiben
-                loss_idt = args.lambda_cycle * args.lambda_identity * (
-                    l1(G_AB(real_B), real_B) + l1(G_BA(real_A), real_A))
-            else:
-                loss_idt = torch.zeros((), device=device)
-            loss_G = loss_gan + loss_cycle + loss_idt
-            loss_G.backward()
-            opt_G.step()
+                pred_fake_B = D_B(fake_B)             # Generator will, dass D "echt" (1) sagt
+                pred_fake_A = D_A(fake_A)
+                loss_gan = gan_loss(pred_fake_B, torch.ones_like(pred_fake_B)) \
+                    + gan_loss(pred_fake_A, torch.ones_like(pred_fake_A))
+                loss_cycle = args.lambda_cycle * (l1(rec_A, real_A) + l1(rec_B, real_B))
+                if args.lambda_identity > 0:          # echte Gurke in G_AB soll Gurke bleiben
+                    loss_idt = args.lambda_cycle * args.lambda_identity * (
+                        l1(G_AB(real_B), real_B) + l1(G_BA(real_A), real_A))
+                else:
+                    loss_idt = torch.zeros((), device=device)
+                loss_G = loss_gan + loss_cycle + loss_idt
+            scaler.scale(loss_G).backward()           # ohne --amp: einfach loss_G.backward()
+            scaler.step(opt_G)                        # ohne --amp: einfach opt_G.step()
 
             # 2) Diskriminatoren: echte Bilder -> 1, Fakes (aus dem Pool, ohne Gradient zum G) -> 0
             set_requires_grad([D_A, D_B], True)
             opt_D.zero_grad(set_to_none=True)
-            loss_D = 0.0
-            for D, real, fake in ((D_A, real_A, pool_A.query(fake_A)), (D_B, real_B, pool_B.query(fake_B))):
-                pred_real = D(real)
-                pred_fake = D(fake.detach())
-                loss_D = loss_D + 0.5 * (gan_loss(pred_real, torch.ones_like(pred_real))
-                                         + gan_loss(pred_fake, torch.zeros_like(pred_fake)))
-            loss_D.backward()
-            opt_D.step()
+            with autocast():
+                loss_D = 0.0
+                for D, real, fake in ((D_A, real_A, pool_A.query(fake_A)), (D_B, real_B, pool_B.query(fake_B))):
+                    pred_real = D(real)
+                    pred_fake = D(fake.detach())
+                    loss_D = loss_D + 0.5 * (gan_loss(pred_real, torch.ones_like(pred_real))
+                                             + gan_loss(pred_fake, torch.zeros_like(pred_fake)))
+            scaler.scale(loss_D).backward()
+            scaler.step(opt_D)
+            scaler.update()                           # Skalierungsfaktor für den nächsten Schritt anpassen
 
             # 3) Logging
             step += 1
@@ -211,6 +226,7 @@ def main() -> None:
                 save_grid(sample_grid(G_AB, G_BA, fixed_A, fixed_B),
                           out_dir / "samples" / f"step_{step:07d}.png", nrow=n_fixed)
 
+        epoch_time = time.time() - t_epoch
         sched_G.step()
         sched_D.step()
 
@@ -225,6 +241,7 @@ def main() -> None:
             "nets": {k: net.state_dict() for k, net in nets.items()},
             "opt_G": opt_G.state_dict(), "opt_D": opt_D.state_dict(),
             "sched_G": sched_G.state_dict(), "sched_D": sched_D.state_dict(),
+            "scaler": scaler.state_dict(),
         }
         torch.save(ckpt, ckpt_dir / "latest.pt")
         if (epoch + 1) % args.save_every == 0 or epoch + 1 == total_epochs:
@@ -232,7 +249,8 @@ def main() -> None:
             light = {k: ckpt[k] for k in ("config", "epoch", "step", "nets")}
             torch.save(light, ckpt_dir / f"epoch_{epoch + 1:03d}.pt")
         print(f"Epoche {epoch + 1}/{total_epochs} fertig, Schritt {step}, "
-              f"lr {opt_G.param_groups[0]['lr']:.2e}, Bild: {out_dir / 'samples'}")
+              f"{epoch_time:.0f} s ({epoch_time / len(loader):.3f} s/Schritt), "
+              f"lr {opt_G.param_groups[0]['lr']:.2e}", flush=True)
 
     writer.close()
 
