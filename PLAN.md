@@ -148,15 +148,24 @@ Konkret heißt das:
 **Fertig, wenn:** `import torch` läuft und der erste Commit steht.
 
 ### Phase 1: Daten
-- [ ] Gesichter: FFHQ small (Kaggle), etwa 3.100 Bilder
-- [ ] Gurken: Jin 2023 (Zenodo), Ordner „Fruit Dataset“, etwa 1.800 Fotos (Quellen siehe README)
+- [x] Gesichter: FFHQ small (Kaggle), 3.143 Bilder, 1024×1024
+- [x] Gurken: Jin 2023 (Zenodo), Ordner „Fruit Dataset“, 1.811 Fotos (Quellen siehe README)
 - [x] Gurkenbilder von Hand sichten
 - [x] Exakte Duplikate entfernen (md5): FFHQ 0, Jin 0
-- [ ] Split train/test etwa 90/10 pro **Originalfoto** über einen Hash des Dateinamens (stabil, auch beim späteren Neuerzeugen in 256 px)
-- [ ] Gurken: Gurke finden, waagerecht drehen, quadratische Ausschnitte entlang der Gurke schneiden (Ausschnitte erben den Split ihres Fotos)
-- [ ] Auf 128×128 skalieren
+- [x] Split train/test etwa 90/10 pro **Originalfoto** über einen Hash des Dateinamens (stabil, auch beim späteren Neuerzeugen in 256 px)
+- [x] Gurken: Gurke finden (nur grüne Farbtöne, Farbkarten als Rechtecke ausgeschlossen), waagerecht drehen, quadratische Ausschnitte entlang der Gurke schneiden (Ausschnitte erben den Split ihres Fotos)
+- [x] Auf 128×128 skalieren: `python scripts/prepare_data.py build --size 128`
 
 Reihenfolge: Duplikate entfernen → Split → Zuschneiden. Wie in den Original-Datensätzen von CycleGAN gibt es nur train und test (kein val), siehe Phase 7.
+
+Ergebnis `data/processed/128/` (Herkunft jedes Bildes in `manifest.csv`):
+
+| | train | test |
+|---|---|---|
+| A: Gesichter | 2.856 | 287 |
+| B: Gurkenquadrate | 8.220 (aus 1.549 Fotos) | 843 (aus 166 Fotos) |
+
+96 Gurkenfotos liefern kein Quadrat (gelbe Gurken, zu dünne Gurken < 128 px).
 
 **Fertig, wenn:** Ein Bildgrid beider Domänen sauber aussieht und die Bildzahlen pro Split dokumentiert sind.
 
