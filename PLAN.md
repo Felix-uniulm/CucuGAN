@@ -185,10 +185,12 @@ Selbsttest: `python src/models.py`
 **Fertig, wenn:** Shapes und Parameterzahlen stimmen.
 
 ### Phase 4: Trainingsloop
-- [ ] Losses, Optimizer, ImagePool, LR-Schedule
-- [ ] Logging (TensorBoard), alle N Schritte Beispielbilder, Checkpoints mit Resume
-- [ ] Config über argparse oder YAML
+- [x] Losses, Optimizer, ImagePool, LR-Schedule (`src/train.py`, `src/utils.py`)
+- [x] Logging (TensorBoard), Kontrollbilder pro Epoche (optional alle N Schritte), Checkpoints mit Resume
+- [x] Config über argparse, gespeichert in `outputs/<name>/config.json` und jedem Checkpoint
 - [ ] **Sanity-Check:** auf etwa 20 Bildern overfitten, bis die Rekonstruktionen fast perfekt sind
+  - CPU-Lauf (20 Bilder, 40 Epochen = 800 Schritte, ~30 min): Training läuft stabil, Cycle-Loss fällt 9,4 → 3,0, D-Loss ~0,4 (kein Kollaps). Fake-Gurken: grüne Schalentextur mit erkennbarem Gesicht als Relief, auch Hintergrund vergurkt (siehe Abschnitt 4). Rekonstruktionen erkennbar, aber noch unscharf, leichte Schachbrettmuster.
+  - Offen: längerer Lauf (z. B. 200 Epochen) als erster Test auf der GPU, bis die Rekonstruktionen fast perfekt sind.
 
 **Fertig, wenn:** Ein Mini-Training auf der CPU durchläuft und sinnvolle Bilder speichert.
 
