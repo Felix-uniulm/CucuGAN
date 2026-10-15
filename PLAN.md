@@ -150,7 +150,8 @@ Konkret heißt das:
 ### Phase 1: Daten
 - [ ] Gesichter: FFHQ small (Kaggle), etwa 3.100 Bilder
 - [ ] Gurken: Jin 2023 (Zenodo), Ordner „Fruit Dataset“, etwa 1.800 Fotos (Quellen siehe README)
-- [ ] Gurkenbilder von Hand sichten, Duplikate entfernen (`imagehash`)
+- [x] Gurkenbilder von Hand sichten
+- [x] Exakte Duplikate entfernen (md5): FFHQ 0, Jin 0
 - [ ] Split train/test etwa 90/10 pro **Originalfoto** über einen Hash des Dateinamens (stabil, auch beim späteren Neuerzeugen in 256 px)
 - [ ] Gurken: Gurke finden, waagerecht drehen, quadratische Ausschnitte entlang der Gurke schneiden (Ausschnitte erben den Split ihres Fotos)
 - [ ] Auf 128×128 skalieren
