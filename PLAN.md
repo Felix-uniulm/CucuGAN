@@ -212,14 +212,16 @@ Selbsttest: `python src/models.py`
 - [x] Config über argparse, gespeichert in `outputs/<name>/config.json` und jedem Checkpoint
 - [ ] **Sanity-Check:** auf etwa 20 Bildern overfitten, bis die Rekonstruktionen fast perfekt sind
   - CPU-Lauf (20 Bilder, 40 Epochen = 800 Schritte, ~30 min): Training läuft stabil, Cycle-Loss fällt 9,4 → 3,0, D-Loss ~0,4 (kein Kollaps). Fake-Gurken: grüne Schalentextur mit erkennbarem Gesicht als Relief, auch Hintergrund vergurkt (siehe Abschnitt 4). Rekonstruktionen erkennbar, aber noch unscharf, leichte Schachbrettmuster.
-  - Offen: längerer Lauf (z. B. 200 Epochen) als erster Test auf der GPU, bis die Rekonstruktionen fast perfekt sind.
+  - GPU-Lauf auf Kaggle (collage128, 20 Bilder, 200 Epochen = 4.000 Schritte, 19 min): läuft stabil, auf ungesehenen Testgesichtern wird das Gesicht zum grünen Oval, Haare/Hintergrund bleiben. Rekonstruktion der Testgesichter erkennbar, aber unscharf (bei 20 Trainingsbildern erwartbar). Für die Baseline als Nachweis ausreichend.
 
 **Fertig, wenn:** Ein Mini-Training auf der CPU durchläuft und sinnvolle Bilder speichert.
 
 ### Phase 5: Baseline-Training
-- [ ] GPU wählen (eigener PC, Uni-Cluster, Kaggle oder Colab)
-- [ ] Volles Training mit den Standardwerten
-- [ ] Festen Satz von 16 Test-Gesichtern in jeder Epoche umwandeln und speichern
+- [x] GPU wählen: **Kaggle** (Tesla T4, 15 GB, 30 GPU-h/Woche, Sitzungen max. 12 h), Notebook `notebooks/kaggle_train.ipynb`. bwUniCluster 3.0 (A100/H100) als nächster Schritt: Anmeldung über kiz-Helpdesk (Entitlement), bwIDM, 2FA, Uni-VPN.
+- [x] Geschwindigkeit gemessen (128 px, Batch 1, T4): 32 Bit 0,136 s/Schritt, Mixed Precision (`--amp`) 0,118 s/Schritt. Nur ~13 % schneller, weil die GPU bei Batch 1 vor allem auf Verwaltungsarbeit wartet. Ein Schritt kostet ~343 GFLOP (256 px: ~1.375 GFLOP).
+- [x] Mixed-Precision-Test (`amp_test`, 1.000 Schritte): stabil, Bilder plausibel.
+- [ ] Volles Training mit den Standardwerten: `RUN, EXTRA = "baseline", "--amp"`, 200 Epochen × 1.431 Schritte, erwartet ~10 h (eine Kaggle-Sitzung)
+- [x] Fester Satz Testbilder in jeder Epoche umgewandelt und gespeichert (8 Gesichter + 8 Collagen)
 
 **Fertig, wenn:** Ein Checkpoint vorliegt, der erkennbar Gurkiges erzeugt.
 
@@ -232,6 +234,7 @@ Selbsttest: `python src/models.py`
 ### Phase 7: Experimente (je nur **eine** Änderung gegenüber der Baseline)
 Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der besten Variante sind dadurch leicht optimistisch; bei Bedarf später einen Teil von train als val abzweigen.
 - [ ] Collage vs. Schalenquadrate (`--data data/processed/squares128`) im vollen Training vergleichen
+- [ ] Größere Batch Size (z. B. 4 oder 8): nutzt die GPU besser aus (bei Batch 1 nur ~1/6 der T4-Leistung), verändert aber das Lernverhalten
 - [ ] Collage-Parameter variieren (Gurkengröße, Anteil Hintergrund-Porträts, auch krumme Gurken zulassen)
 
 - [ ] λ_cycle variieren (z. B. 5 oder 2): mehr Freiheit für Formänderungen
