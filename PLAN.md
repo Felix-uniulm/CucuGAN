@@ -111,7 +111,7 @@ Die meisten Fehler passieren hier: welcher Loss welches Netz updatet, wo `detach
 | `src/utils.py` | `ImagePool`, LR-Schedule, Bilder speichern, Denormalisierung |
 | `src/train.py` | Losses, Trainingsloop, Logging, Checkpoints, Config |
 | `src/infer.py` | Bild oder Ordner rein, Gurkengesicht raus |
-| `src/evaluate.py` | KID/FID auf val/test |
+| `src/evaluate.py` | KID/FID auf test |
 | `scripts/prepare_data.py` | Zuschneiden, Skalieren, Deduplizieren, Split |
 
 ### Grundregel: alles konfigurierbar
@@ -148,11 +148,14 @@ Konkret heißt das:
 **Fertig, wenn:** `import torch` läuft und der erste Commit steht.
 
 ### Phase 1: Daten
-- [ ] Gesichter: CelebA (aligned) oder FFHQ-Thumbnails, etwa 3.000 Bilder auswählen
-- [ ] Gurken: Kaggle „Vegetable Image Dataset“ (Klasse *Cucumber*) und/oder Open Images V7
+- [ ] Gesichter: FFHQ small (Kaggle), etwa 3.100 Bilder
+- [ ] Gurken: Jin 2023 (Zenodo), Ordner „Fruit Dataset“, etwa 1.800 Fotos (Quellen siehe README)
 - [ ] Gurkenbilder von Hand sichten, Duplikate entfernen (`imagehash`)
-- [ ] Auf 128×128 zuschneiden und skalieren
-- [ ] Split etwa 90/5/5 (train/val/test) mit festem Seed; bei CelebA die offizielle Partition nutzen
+- [ ] Split train/test etwa 90/10 pro **Originalfoto** über einen Hash des Dateinamens (stabil, auch beim späteren Neuerzeugen in 256 px)
+- [ ] Gurken: Gurke finden, waagerecht drehen, quadratische Ausschnitte entlang der Gurke schneiden (Ausschnitte erben den Split ihres Fotos)
+- [ ] Auf 128×128 skalieren
+
+Reihenfolge: Duplikate entfernen → Split → Zuschneiden. Wie in den Original-Datensätzen von CycleGAN gibt es nur train und test (kein val), siehe Phase 7.
 
 **Fertig, wenn:** Ein Bildgrid beider Domänen sauber aussieht und die Bildzahlen pro Split dokumentiert sind.
 
@@ -179,17 +182,19 @@ Konkret heißt das:
 ### Phase 5: Baseline-Training
 - [ ] GPU wählen (eigener PC, Uni-Cluster, Kaggle oder Colab)
 - [ ] Volles Training mit den Standardwerten
-- [ ] Festen Satz von 16 Val-Gesichtern in jeder Epoche umwandeln und speichern
+- [ ] Festen Satz von 16 Test-Gesichtern in jeder Epoche umwandeln und speichern
 
 **Fertig, wenn:** Ein Checkpoint vorliegt, der erkennbar Gurkiges erzeugt.
 
 ### Phase 6: Evaluation
 - [ ] `infer.py`
-- [ ] KID (bei wenigen Bildern zuverlässiger) und FID auf val, z. B. mit `torchmetrics` oder `torch-fidelity`
+- [ ] KID (bei wenigen Bildern zuverlässiger) und FID auf test, z. B. mit `torchmetrics` oder `torch-fidelity`
 
 **Fertig, wenn:** Für die Baseline eine Zahl und ein Bildgrid vorliegen.
 
 ### Phase 7: Experimente (je nur **eine** Änderung gegenüber der Baseline)
+Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der besten Variante sind dadurch leicht optimistisch; bei Bedarf später einen Teil von train als val abzweigen.
+
 - [ ] λ_cycle variieren (z. B. 5 oder 2): mehr Freiheit für Formänderungen
 - [ ] λ_identity variieren
 - [ ] DiffAugment (wenig Gurkendaten)
