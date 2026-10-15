@@ -5,7 +5,7 @@ Erwartete Ordnerstruktur (erzeugt von scripts/prepare_data.py):
     <root>/<split>/B/*.png   Gurken
 
 Selbsttest (speichert einen Batch als Bild):
-    python src/dataset.py --root data/processed/128
+    python src/dataset.py --root data/processed/collage128
 """
 
 import argparse
@@ -62,7 +62,7 @@ class UnpairedDataset(Dataset):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Einen Batch laden und als Bild speichern")
-    parser.add_argument("--root", default="data/processed/128")
+    parser.add_argument("--root", default="data/processed/collage128")
     parser.add_argument("--split", default="train")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--out", default="outputs/batch_check.png")

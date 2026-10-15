@@ -158,7 +158,7 @@ Konkret heißt das:
 
 Reihenfolge: Duplikate entfernen → Split → Zuschneiden. Wie in den Original-Datensätzen von CycleGAN gibt es nur train und test (kein val), siehe Phase 7.
 
-Ergebnis `data/processed/128/` (Herkunft jedes Bildes in `manifest.csv`):
+Ergebnis `data/processed/squares128/` (früher `128/`) (Herkunft jedes Bildes in `manifest.csv`):
 
 | | train | test |
 |---|---|---|
@@ -166,6 +166,28 @@ Ergebnis `data/processed/128/` (Herkunft jedes Bildes in `manifest.csv`):
 | B: Gurkenquadrate | 8.220 (aus 1.549 Fotos) | 843 (aus 166 Fotos) |
 
 96 Gurkenfotos liefern kein Quadrat (gelbe Gurken, zu dünne Gurken < 128 px).
+
+#### Wechsel auf Collagen (Branch `gurken-collage`)
+Mit den Schalenquadraten wird das **ganze Bild** Gurke, Haare und Hintergrund gehen verloren (siehe Abschnitt 4). Ziel ist aber: Gesicht wird Gurke, **Haare bleiben**. Deshalb drei vergleichbare Overfit-Tests (je 20 gleiche Gesichter, 40 Epochen CPU, nur die Gurkenbilder verschieden):
+
+| Lauf | Gurkenbilder | Haare | Hintergrund | Grün wird |
+|---|---|---|---|---|
+| `overfit` | Schalenquadrate | weg | weg | alles |
+| `overfit_umgebung` | 22 Gurkenfotos mit Umgebung (Commons) | bleiben | teils grünstichig | Gesicht + Umgebung |
+| `overfit_collage` | 22 Collagen | bleiben | meist original | **gezielt das Gesicht** |
+
+Prinzip (wie horse2zebra): CycleGAN ändert, worin sich die Domänen unterscheiden. Bei den Collagen sind Haare, Hals und Hintergrund in beiden Domänen gleich verteilt, nur Gesicht vs. Gurke unterscheidet sich. Gurkentextur (Noppen) war nach 800 Schritten bei keinem Lauf mit Umgebung sichtbar, nur Farbe; das muss das lange Training zeigen.
+
+- [x] `build --mode collage`: freigestellte, senkrechte Jin-Gurke auf die Gesichtsposition eines FFHQ-Porträts (weiche Kante, Größe/Position leicht zufällig). Nur gerade Gurken ohne dunkle Stellen (391 von 1.811). Porträts werden per Hash zu Gesicht (A) oder Hintergrund (B), etwa 50/50.
+
+Ergebnis `data/processed/collage128/` (Standard für `train.py`):
+
+| | train | test |
+|---|---|---|
+| A: Gesichter | 1.431 | 150 |
+| B: Collagen | 1.425 (351 verschiedene Gurken) | 137 (40 verschiedene Gurken) |
+
+Geprüft: kein Porträt ist zugleich Gesicht und Hintergrund, keine Gurke in train und test.
 
 **Fertig, wenn:** Ein Bildgrid beider Domänen sauber aussieht und die Bildzahlen pro Split dokumentiert sind.
 
@@ -209,7 +231,8 @@ Selbsttest: `python src/models.py`
 
 ### Phase 7: Experimente (je nur **eine** Änderung gegenüber der Baseline)
 Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der besten Variante sind dadurch leicht optimistisch; bei Bedarf später einen Teil von train als val abzweigen.
-- [ ] Falls Hintergrund und Haare mit vergurken: Hautmaske beim Anwenden (siehe Abschnitt 4, „Ganzes Bild wird Gurke“)
+- [ ] Collage vs. Schalenquadrate (`--data data/processed/squares128`) im vollen Training vergleichen
+- [ ] Collage-Parameter variieren (Gurkengröße, Anteil Hintergrund-Porträts, auch krumme Gurken zulassen)
 
 - [ ] λ_cycle variieren (z. B. 5 oder 2): mehr Freiheit für Formänderungen
 - [ ] λ_identity variieren
@@ -234,6 +257,8 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
   2. Maske beim Anwenden: In `infer.py` nur die Hautbereiche aus dem Generator übernehmen, den Rest aus dem Original (Hautmaske über ein fertiges Face-Parsing-Modell).
   3. Maske beim Training: Diskriminator-Loss nur auf Hautbereichen.
   4. Modell mit eigener Aufmerksamkeit, z. B. U-GAT-IT (siehe Phase 7).
+
+  **Entscheidung:** keine Maske (nimmt den Gag), stattdessen die Gurkendomäne angepasst: Collagen (siehe Phase 1). Neues Risiko: Die Collagen haben keine Augen und keinen Mund. Der Diskriminator drängt darauf, sie verschwinden zu lassen, der Cycle-Loss will sie behalten. Außerdem kann der Collage-Look (Kanten, Licht) mitgelernt werden.
 - **Schachbrettmuster:** `ConvTranspose2d` im Decoder kann Checkerboard-Artefakte erzeugen. Falls sichtbar: durch Hochskalieren + normale Faltung ersetzen.
 
 ## 5. Weiterführende Literatur

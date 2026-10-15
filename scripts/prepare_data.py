@@ -5,11 +5,18 @@ Reihenfolge: exakte Duplikate entfernen -> Split (train/test) -> Zuschneiden -> 
 Befehle: dedupe (exakte Duplikate), split (Aufteilung anzeigen), preview (Gurkenerkennung
 prüfen), build (fertige Trainingsbilder erzeugen).
 
+Zwei Arten von Gurkenbildern (build --mode):
+    collage   Ganze, freigestellte Gurke auf die Gesichtsposition eines FFHQ-Porträts montiert.
+              Haare und Hintergrund sind in beiden Domänen gleich, nur Gesicht vs. Gurke
+              unterscheidet sich. Dafür wird ein Teil der Porträts zu Hintergründen.
+    squares   Quadratische Ausschnitte der Gurkenschale (nur Textur, ohne Umgebung).
+
 Beispiel:
     python scripts/prepare_data.py dedupe --src data/raw/cucumber/jin2023 --report outputs/dedupe/jin2023
     python scripts/prepare_data.py split --src data/raw/cucumber/jin2023
     python scripts/prepare_data.py preview --src data/raw/cucumber/jin2023
-    python scripts/prepare_data.py build --size 128
+    python scripts/prepare_data.py build --mode collage --size 128     # -> data/processed/collage128
+    python scripts/prepare_data.py build --mode squares --size 128     # -> data/processed/squares128
 """
 
 import argparse
@@ -37,6 +44,14 @@ MAX_RECT_FILL = 0.9       # füllt eine Fläche ihr gedrehtes Rechteck stärker,
 # Quadrate
 SQUARE_FRACTION = 0.8     # Kantenlänge = 0.8 * typische Gurkendicke
 MIN_SKIN_FRACTION = 0.97  # so viel des Quadrats muss Gurke sein
+# Collage (Anteile der Bildgröße; FFHQ ist ausgerichtet, das Gesicht liegt immer gleich)
+FACE_CENTER = (0.50, 0.56)   # Mitte des Gesichts (x, y)
+FACE_SIZE = (0.50, 0.70)     # Breite, Höhe der Fläche, die die Gurke bedecken soll
+SIZE_JITTER = (0.95, 1.10)   # zufällige Größenvariation
+POS_JITTER = 0.02            # zufällige Verschiebung
+MIN_STRAIGHTNESS = 0.78      # rect_fill der Gurke: krumme Gurken (Sicheln) lassen Gesichtsteile frei
+MIN_WIDTH_RATIO = 0.22       # Breite/Länge: sehr dünne Stangen würden extrem gestreckt
+MAX_DARK_FRACTION = 0.01     # Anteil dunkler Pixel in der Gurke (Stoff, Schatten) -> verwerfen
 
 
 def list_images(folder: Path) -> list[Path]:
@@ -81,9 +96,19 @@ def split_for(name: str, test_fraction: float, seed: int = 0) -> str:
     landet damit immer im selben Split, egal welche anderen Dateien es gibt.
     Mit einem anderen seed entsteht eine andere, ebenso stabile Aufteilung.
     """
-    digest = hashlib.md5(f"{seed}:{name}".encode()).hexdigest()
-    u = int(digest, 16) / 16 ** len(digest)
-    return "test" if u < test_fraction else "train"
+    return "test" if unit_hash(f"{seed}:{name}") < test_fraction else "train"
+
+
+def unit_hash(text: str) -> float:
+    """Text -> gleichverteilte, aber feste Zahl in [0, 1)."""
+    digest = hashlib.md5(text.encode()).hexdigest()
+    return int(digest, 16) / 16 ** len(digest)
+
+
+def is_background(name: str, background_fraction: float, seed: int = 0) -> bool:
+    """Collage-Modus: Wird dieses Porträt Hintergrund (Domäne B) statt Gesicht (Domäne A)?
+    Unabhängig vom Split (anderes Präfix im Hash), ebenfalls stabil."""
+    return unit_hash(f"background:{seed}:{name}") < background_fraction
 
 
 def load_image(path: Path) -> Image.Image:
@@ -223,6 +248,60 @@ def process_cucumber_photo(path: Path):
     return path, squares, info, img
 
 
+def cucumber_cutout(path: Path) -> Image.Image | None:
+    """Ganze Gurke freigestellt und senkrecht gedreht, als RGBA (Alpha = Maske).
+
+    None, wenn keine Gurke gefunden wurde oder sie sich nicht eignet (krumm, zu dünn, dunkle Stellen).
+    """
+    img = load_image(path)
+    found = find_cucumber(img)
+    if found is None:
+        return None
+    mask, factor = found
+    if rect_fill(np.argwhere(mask)) < MIN_STRAIGHTNESS:
+        return None
+
+    # Löcher (helle Noppen) füllen: alles, was vom Bildrand aus nicht erreichbar ist, gehört zur Gurke
+    m = Image.fromarray(np.pad(mask.astype(np.uint8) * 255, 1)).copy()  # copy(): sonst schreibgeschützt
+    ImageDraw.floodfill(m, (0, 0), 128)
+    filled = np.asarray(m)[1:-1, 1:-1] != 128
+
+    ys, xs = np.nonzero(filled)
+    dx, dy = principal_axes(np.stack([xs, ys], axis=1))[:, 0]
+    angle = math.degrees(math.atan2(dy, dx)) + 90          # Hauptachse senkrecht
+
+    # Maske 1 px nach innen (kein schwarzer Saum), auf Originalgröße bringen
+    m = Image.fromarray(filled.astype(np.uint8) * 255).filter(ImageFilter.MinFilter(3))
+    m = m.resize(img.size, Image.BILINEAR).point(lambda v: 255 if v > 127 else 0)
+    rgba = img.copy()
+    rgba.putalpha(m)
+    rgba = rgba.crop(m.getbbox()).rotate(angle, resample=Image.BICUBIC, expand=True)
+    rgba = rgba.crop(rgba.getbbox())
+
+    arr = np.asarray(rgba)
+    inside = arr[..., 3] > 200
+    dark = (arr[..., :3].max(axis=2) < 40) & inside
+    if dark.sum() > MAX_DARK_FRACTION * inside.sum():
+        return None
+    if rgba.width / rgba.height < MIN_WIDTH_RATIO:
+        return None
+    return rgba
+
+
+def montage(portrait: Image.Image, cutout: Image.Image, rng: random.Random) -> Image.Image:
+    """Gurke auf die Gesichtsposition des Porträts setzen, mit weicher Kante."""
+    S = portrait.width
+    w = int(S * FACE_SIZE[0] * rng.uniform(*SIZE_JITTER))
+    h = int(S * FACE_SIZE[1] * rng.uniform(*SIZE_JITTER))
+    cut = cutout.resize((w, h), Image.LANCZOS)                    # auf Gesichtsgröße strecken
+    cut.putalpha(cut.getchannel("A").filter(ImageFilter.GaussianBlur(S / 256)))
+    cx = int(S * (FACE_CENTER[0] + rng.uniform(-POS_JITTER, POS_JITTER)))
+    cy = int(S * (FACE_CENTER[1] + rng.uniform(-POS_JITTER, POS_JITTER)))
+    result = portrait.copy()
+    result.paste(cut, (cx - w // 2, cy - h // 2), cut)
+    return result
+
+
 def cmd_preview(args) -> None:
     """Zufällige Fotos verarbeiten und Kontrollbilder speichern (schreibt nichts nach data/)."""
     paths = list_images(args.src)
@@ -268,17 +347,19 @@ def safe_stem(path: Path) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in path.stem)
 
 
-def build_face(path: Path, out: Path, size: int, test_fraction: float, seed: int):
-    split = split_for(path.name, test_fraction, seed)
+# Manifest-Zeilen: (domain, split, datei, quelle, gurke, winkel, kante_px)
+MANIFEST_HEADER = ["domain", "split", "datei", "quelle", "gurke", "winkel", "kante_px"]
+
+
+def build_face(path: Path, out: Path, size: int, split: str):
     img = load_image(path).resize((size, size), Image.LANCZOS)
     name = f"{safe_stem(path)}.png"
     img.save(out / split / "A" / name)
-    return [("A", split, name, path.name, "", "")]
+    return [("A", split, name, path.name, "", "", "")]
 
 
-def build_cucumber(path: Path, out: Path, size: int, test_fraction: float, seed: int):
+def build_squares(path: Path, out: Path, size: int, split: str):
     """Alle Quadrate eines Fotos landen im Split des Fotos (Gruppierung)."""
-    split = split_for(path.name, test_fraction, seed)
     _, squares, info, _ = process_cucumber_photo(path)
     rows = []
     for i, sq in enumerate(squares or []):
@@ -286,40 +367,77 @@ def build_cucumber(path: Path, out: Path, size: int, test_fraction: float, seed:
             continue  # nie hochskalieren
         name = f"{safe_stem(path)}_c{i:02d}.png"
         sq.resize((size, size), Image.LANCZOS).save(out / split / "B" / name)
-        rows.append(("B", split, name, path.name, f"{info['angle']:.1f}", info["side"]))
+        rows.append(("B", split, name, path.name, path.name, f"{info['angle']:.1f}", info["side"]))
     return rows
 
 
+def build_collage(portrait_path: Path, cucumber_path: Path, out: Path, size: int, split: str):
+    """Eine Collage: Gurke auf das Gesicht eines Porträts. Zufall fest je Porträt (reproduzierbar)."""
+    rng = random.Random(portrait_path.name)
+    cutout = cucumber_cutout(cucumber_path)
+    portrait = load_image(portrait_path)
+    img = montage(portrait, cutout, rng).resize((size, size), Image.LANCZOS)
+    name = f"{safe_stem(portrait_path)}__{safe_stem(cucumber_path)}.png"
+    img.save(out / split / "B" / name)
+    return [("B", split, name, portrait_path.name, cucumber_path.name, "", "")]
+
+
+def is_usable_cucumber(path: Path) -> bool:
+    return cucumber_cutout(path) is not None
+
+
 def cmd_build(args) -> None:
-    """Fertige Trainingsbilder erzeugen: <out>/<size>/{train,test}/{A,B}/ plus manifest.csv."""
-    out = args.out / str(args.size)
+    """Fertige Trainingsbilder erzeugen: <out>/<mode><size>/{train,test}/{A,B}/ plus manifest.csv."""
+    out = args.out / f"{args.mode}{args.size}"
     if out.exists():
         raise SystemExit(f"{out} existiert schon. Zum Neuerzeugen den Ordner vorher löschen.")
     for split in ("train", "test"):
         for domain in ("A", "B"):
             (out / split / domain).mkdir(parents=True)
 
-    jobs = [(build_face, p) for p in list_images(args.faces)]
-    jobs += [(build_cucumber, p) for p in list_images(args.cucumbers)]
-    rows = []
+    def split_of(p: Path) -> str:
+        return split_for(p.name, args.test_fraction, args.seed)
+
+    faces = list_images(args.faces)
+    cucumbers = list_images(args.cucumbers)
+    jobs = []  # (funktion, argumente ohne out/size)
     with ProcessPoolExecutor(args.workers) as pool:
-        futures = [pool.submit(fn, p, out, args.size, args.test_fraction, args.seed) for fn, p in jobs]
+        if args.mode == "squares":
+            jobs += [(build_face, (p, split_of(p))) for p in faces]
+            jobs += [(build_squares, (p, split_of(p))) for p in cucumbers]
+        else:
+            # 1) Welche Gurken eignen sich für die Collage? (gerade, ohne dunkle Stellen)
+            print("Prüfe Gurken für die Collage ...", flush=True)
+            usable = [p for p, ok in zip(cucumbers, pool.map(is_usable_cucumber, cucumbers, chunksize=8)) if ok]
+            print(f"  {len(usable)} von {len(cucumbers)} Gurken geeignet")
+            # 2) Porträts aufteilen: Gesicht (A) oder Hintergrund für eine Collage (B)
+            for split in ("train", "test"):
+                split_faces = [p for p in faces if split_of(p) == split]
+                split_cucs = [p for p in usable if split_of(p) == split]
+                random.Random(f"{args.seed}:{split}").shuffle(split_cucs)
+                backgrounds = [p for p in split_faces if is_background(p.name, args.background_fraction, args.seed)]
+                jobs += [(build_face, (p, split)) for p in split_faces if p not in backgrounds]
+                # jede Gurke kommt der Reihe nach dran, bei mehr Hintergründen als Gurken mehrfach
+                jobs += [(build_collage, (bg, split_cucs[i % len(split_cucs)], split))
+                         for i, bg in enumerate(backgrounds)]
+
+        rows = []
+        futures = [pool.submit(fn, *a[:-1], out, args.size, a[-1]) for fn, a in jobs]
         for k, f in enumerate(futures, 1):
             rows += f.result()
             if k % 200 == 0 or k == len(futures):
-                print(f"  {k}/{len(futures)} Fotos verarbeitet", flush=True)
+                print(f"  {k}/{len(futures)} Bilder verarbeitet", flush=True)
 
     with open(out / "manifest.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["domain", "split", "datei", "quelle", "winkel", "kante_px"])
+        w.writerow(MANIFEST_HEADER)
         w.writerows(rows)
 
     for domain, label in (("A", "Gesichter"), ("B", "Gurken")):
         for split in ("train", "test"):
             sel = [r for r in rows if r[0] == domain and r[1] == split]
-            print(f"{label:9s} {split:5s}: {len(sel):5d} Bilder aus {len({r[3] for r in sel})} Fotos")
-    used = {r[3] for r in rows if r[0] == "B"}
-    print(f"Gurkenfotos ohne verwendbares Quadrat: {len(list_images(args.cucumbers)) - len(used)}")
+            extra = f", {len({r[4] for r in sel})} verschiedene Gurken" if domain == "B" else ""
+            print(f"{label:9s} {split:5s}: {len(sel):5d} Bilder{extra}")
     print(f"Fertig: {out}")
 
 
@@ -370,8 +488,12 @@ def main() -> None:
     p.add_argument("--workers", type=int, default=4, help="Anzahl paralleler Prozesse")
     p.set_defaults(func=cmd_preview)
 
-    p = sub.add_parser("build", help="Trainingsbilder erzeugen (Gesichter skalieren, Gurkenquadrate schneiden)")
+    p = sub.add_parser("build", help="Trainingsbilder erzeugen (Gesichter skalieren, Gurkenbilder erzeugen)")
+    p.add_argument("--mode", choices=("collage", "squares"), default="collage",
+                   help="Art der Gurkenbilder (siehe Beschreibung oben)")
     p.add_argument("--size", type=int, default=128, help="Kantenlänge der fertigen Bilder in px")
+    p.add_argument("--background-fraction", type=float, default=0.5,
+                   help="collage: Anteil der Porträts, die Hintergrund statt Gesicht werden")
     p.add_argument("--faces", type=Path, default=Path("data/raw/ffhq"), help="Ordner mit Gesichtern")
     p.add_argument("--cucumbers", type=Path, default=Path("data/raw/cucumber/jin2023"), help="Ordner mit Gurkenfotos")
     p.add_argument("--out", type=Path, default=Path("data/processed"), help="Zielordner")
