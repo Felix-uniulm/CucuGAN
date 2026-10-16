@@ -22,6 +22,8 @@ Beispiel:
 import argparse
 import collections
 import csv
+import functools
+import json
 import hashlib
 import math
 import random
@@ -46,7 +48,8 @@ SQUARE_FRACTION = 0.8     # Kantenlänge = 0.8 * typische Gurkendicke
 MIN_SKIN_FRACTION = 0.97  # so viel des Quadrats muss Gurke sein
 # Collage (Anteile der Bildgröße; FFHQ ist ausgerichtet, das Gesicht liegt immer gleich)
 FACE_CENTER = (0.50, 0.56)   # Mitte des Gesichts (x, y)
-FACE_SIZE = (0.50, 0.70)     # Breite, Höhe der Fläche, die die Gurke bedecken soll
+FACE_SIZE = (0.66, 0.86)     # Breite, Höhe der Gurke: ganzes Gesicht bedeckt, Haare seitlich/oben bleiben
+                             # (Baseline 1 hatte 0.50 x 0.70: Wangen, Kinn, Stirn schauten heraus)
 SIZE_JITTER = (0.95, 1.10)   # zufällige Größenvariation
 POS_JITTER = 0.02            # zufällige Verschiebung
 MIN_STRAIGHTNESS = 0.78      # rect_fill der Gurke: krumme Gurken (Sicheln) lassen Gesichtsteile frei
@@ -288,11 +291,12 @@ def cucumber_cutout(path: Path) -> Image.Image | None:
     return rgba
 
 
-def montage(portrait: Image.Image, cutout: Image.Image, rng: random.Random) -> Image.Image:
+def montage(portrait: Image.Image, cutout: Image.Image, rng: random.Random,
+            face_size: tuple[float, float] = FACE_SIZE) -> Image.Image:
     """Gurke auf die Gesichtsposition des Porträts setzen, mit weicher Kante."""
     S = portrait.width
-    w = int(S * FACE_SIZE[0] * rng.uniform(*SIZE_JITTER))
-    h = int(S * FACE_SIZE[1] * rng.uniform(*SIZE_JITTER))
+    w = int(S * face_size[0] * rng.uniform(*SIZE_JITTER))
+    h = int(S * face_size[1] * rng.uniform(*SIZE_JITTER))
     cut = cutout.resize((w, h), Image.LANCZOS)                    # auf Gesichtsgröße strecken
     cut.putalpha(cut.getchannel("A").filter(ImageFilter.GaussianBlur(S / 256)))
     cx = int(S * (FACE_CENTER[0] + rng.uniform(-POS_JITTER, POS_JITTER)))
@@ -371,12 +375,13 @@ def build_squares(path: Path, out: Path, size: int, split: str):
     return rows
 
 
-def build_collage(portrait_path: Path, cucumber_path: Path, out: Path, size: int, split: str):
+def build_collage(portrait_path: Path, cucumber_path: Path, out: Path, size: int, split: str,
+                  face_size: tuple[float, float] = FACE_SIZE):
     """Eine Collage: Gurke auf das Gesicht eines Porträts. Zufall fest je Porträt (reproduzierbar)."""
     rng = random.Random(portrait_path.name)
     cutout = cucumber_cutout(cucumber_path)
     portrait = load_image(portrait_path)
-    img = montage(portrait, cutout, rng).resize((size, size), Image.LANCZOS)
+    img = montage(portrait, cutout, rng, face_size).resize((size, size), Image.LANCZOS)
     name = f"{safe_stem(portrait_path)}__{safe_stem(cucumber_path)}.png"
     img.save(out / split / "B" / name)
     return [("B", split, name, portrait_path.name, cucumber_path.name, "", "")]
@@ -418,7 +423,8 @@ def cmd_build(args) -> None:
                 backgrounds = [p for p in split_faces if is_background(p.name, args.background_fraction, args.seed)]
                 jobs += [(build_face, (p, split)) for p in split_faces if p not in backgrounds]
                 # jede Gurke kommt der Reihe nach dran, bei mehr Hintergründen als Gurken mehrfach
-                jobs += [(build_collage, (bg, split_cucs[i % len(split_cucs)], split))
+                collage = functools.partial(build_collage, face_size=tuple(args.face_size))
+                jobs += [(collage, (bg, split_cucs[i % len(split_cucs)], split))
                          for i, bg in enumerate(backgrounds)]
 
         rows = []
@@ -432,6 +438,9 @@ def cmd_build(args) -> None:
         w = csv.writer(f)
         w.writerow(MANIFEST_HEADER)
         w.writerows(rows)
+    # Einstellungen festhalten, mit denen der Datensatz erzeugt wurde
+    settings = {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items() if k != "func"}
+    (out / "build_config.json").write_text(json.dumps(settings, indent=2))
 
     for domain, label in (("A", "Gesichter"), ("B", "Gurken")):
         for split in ("train", "test"):
@@ -492,6 +501,8 @@ def main() -> None:
     p.add_argument("--mode", choices=("collage", "squares"), default="collage",
                    help="Art der Gurkenbilder (siehe Beschreibung oben)")
     p.add_argument("--size", type=int, default=128, help="Kantenlänge der fertigen Bilder in px")
+    p.add_argument("--face-size", type=float, nargs=2, default=FACE_SIZE, metavar=("BREITE", "HOEHE"),
+                   help="collage: Größe der Gurke als Anteil der Bildbreite/-höhe")
     p.add_argument("--background-fraction", type=float, default=0.5,
                    help="collage: Anteil der Porträts, die Hintergrund statt Gesicht werden")
     p.add_argument("--faces", type=Path, default=Path("data/raw/ffhq"), help="Ordner mit Gesichtern")

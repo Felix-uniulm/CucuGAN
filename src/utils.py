@@ -50,6 +50,32 @@ def linear_decay(n_epochs: int, n_epochs_decay: int):
     return factor
 
 
+class StructureLoss(nn.Module):
+    """Vergleicht die groben Kanten zweier Bilder, nicht ihre Farbe.
+
+    Graustufen -> verkleinern (nur grobe Formen wie Augen, Nase, Mund zählen; feine
+    Gurkennoppen darf der Generator frei dazumalen) -> Sobel-Kanten -> normieren -> L1-Abstand.
+    """
+
+    def __init__(self, scale: int = 4):
+        super().__init__()
+        self.scale = scale
+        gx = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]])
+        self.register_buffer("kernels", torch.stack([gx, gx.t()]).unsqueeze(1))  # 2x1x3x3
+
+    def edges(self, x: torch.Tensor) -> torch.Tensor:
+        gray = (0.299 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2]).unsqueeze(1)
+        small = nn.functional.avg_pool2d(gray, self.scale)
+        g = nn.functional.conv2d(nn.functional.pad(small, (1, 1, 1, 1), mode="replicate"), self.kernels.to(x.dtype))
+        e = torch.sqrt(g.pow(2).sum(dim=1) + 1e-6)
+        # pro Bild auf mittlere Kantenstärke normieren: zählt, WO Kanten sind, nicht wie kräftig
+        # (sonst würde schon eine dunklere, kontrastärmere Gurkenhaut bestraft)
+        return e / (e.mean(dim=(1, 2), keepdim=True) + 1e-3)
+
+    def forward(self, fake: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
+        return nn.functional.l1_loss(self.edges(fake), self.edges(real))
+
+
 def set_requires_grad(nets: list[nn.Module], requires_grad: bool) -> None:
     """Gradienten für Netze ein- oder ausschalten (spart Rechenzeit, verhindert falsche Updates)."""
     for net in nets:

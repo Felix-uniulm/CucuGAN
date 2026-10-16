@@ -189,6 +189,8 @@ Ergebnis `data/processed/collage128/` (Standard für `train.py`):
 
 Geprüft: kein Porträt ist zugleich Gesicht und Hintergrund, keine Gurke in train und test.
 
+Nach Baseline 1 (siehe Phase 5): Gurke vergrößert von 50×70 % auf **66×86 %** der Bildgröße (`--face-size`), damit das ganze Gesicht bedeckt ist und keine Hautreste an Wangen/Kinn bleiben. Haare bleiben seitlich/oben sichtbar. Der alte Datensatz liegt als `collage50_128/`. Jeder Build schreibt seine Einstellungen nach `build_config.json`.
+
 **Fertig, wenn:** Ein Bildgrid beider Domänen sauber aussieht und die Bildzahlen pro Split dokumentiert sind.
 
 ### Phase 2: Dataset und DataLoader
@@ -220,7 +222,12 @@ Selbsttest: `python src/models.py`
 - [x] GPU wählen: **Kaggle** (Tesla T4, 15 GB, 30 GPU-h/Woche, Sitzungen max. 12 h), Notebook `notebooks/kaggle_train.ipynb`. bwUniCluster 3.0 (A100/H100) als nächster Schritt: Anmeldung über kiz-Helpdesk (Entitlement), bwIDM, 2FA, Uni-VPN.
 - [x] Geschwindigkeit gemessen (128 px, Batch 1, T4): 32 Bit 0,136 s/Schritt, Mixed Precision (`--amp`) 0,118 s/Schritt. Nur ~13 % schneller, weil die GPU bei Batch 1 vor allem auf Verwaltungsarbeit wartet. Ein Schritt kostet ~343 GFLOP (256 px: ~1.375 GFLOP).
 - [x] Mixed-Precision-Test (`amp_test`, 1.000 Schritte): stabil, Bilder plausibel.
-- [ ] Volles Training mit den Standardwerten: `RUN, EXTRA = "baseline", "--amp"`, 200 Epochen × 1.431 Schritte, erwartet ~10 h (eine Kaggle-Sitzung)
+- [x] **Baseline 1** (`baseline`, Collage 50×70 %, Paper-Standard + `--amp`): 200 Epochen, 0,086 s/Schritt, ~7 h.
+  - Ergebnis: Haare und Hintergrund perfekt erhalten, aber der Generator **klebt eine Gurke über das Gesicht**. Keine Gesichtszüge sichtbar, trotzdem fast perfekte Rekonstruktion: Das Gesicht wird unsichtbar in der Gurke versteckt (**Steganografie**, bekanntes CycleGAN-Phänomen, Chu et al. 2017, *CycleGAN, a Master of Steganography*). Ursache: Die Collagen haben keine Gesichtszüge, und der Cycle-Loss prüft nur, ob man zurückrechnen kann, nicht, ob man etwas sieht.
+- [ ] **Lauf 2** (`collage66`): Collage 66×86 %, dazu
+  - `--lambda-struct 10`: **Struktur-Loss**, grobe Kanten (Graustufen, 1/4 Auflösung, Sobel, pro Bild normiert) von Gesicht und Gurkengesicht müssen übereinstimmen. Umfärben kostet fast nichts (0,035), Gesicht verschwinden lassen kostet viel (0,38 × λ).
+  - `--cycle-noise 0.1`: **Rauschen** vor dem Rückweg, zerstört versteckte Feinmuster
+  - erst Kurztest `struct_test` (20 Epochen, ~45 min), dann voller Lauf
 - [x] Fester Satz Testbilder in jeder Epoche umgewandelt und gespeichert (8 Gesichter + 8 Collagen)
 
 **Fertig, wenn:** Ein Checkpoint vorliegt, der erkennbar Gurkiges erzeugt.
@@ -236,6 +243,8 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
 - [ ] Collage vs. Schalenquadrate (`--data data/processed/squares128`) im vollen Training vergleichen
 - [ ] Größere Batch Size (z. B. 4 oder 8): nutzt die GPU besser aus (bei Batch 1 nur ~1/6 der T4-Leistung), verändert aber das Lernverhalten
 - [ ] Collage-Parameter variieren (Gurkengröße, Anteil Hintergrund-Porträts, auch krumme Gurken zulassen)
+- [ ] λ_struct variieren: Regler zwischen „Gurke mit Gesichtszügen“ (klein) und „grün gefärbtes Gesicht“ (groß)
+- [ ] Frühere Epochen der Baseline ansehen: Im Kurztest nach 1.000 Schritten waren die Gesichtszüge noch sichtbar, irgendwann kippte es zum Überkleben
 
 - [ ] λ_cycle variieren (z. B. 5 oder 2): mehr Freiheit für Formänderungen
 - [ ] λ_identity variieren
