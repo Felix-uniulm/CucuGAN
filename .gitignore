@@ -1,10 +1,11 @@
 # Daten (zu groß, jederzeit neu herunterladbar)
 data/
 
-# Trainingsergebnisse
-checkpoints/
-outputs/
-runs/
+# Trainingsergebnisse (ohne Schrägstrich am Ende: gilt auch für Verknüpfungen, z. B. auf dem Cluster)
+/checkpoints
+/outputs
+/runs
+/logs
 
 # Python-Umgebung und Zwischendateien
 .venv/
