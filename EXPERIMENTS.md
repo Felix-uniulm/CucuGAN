@@ -23,6 +23,10 @@ zusätzlich in `outputs/<name>/config.json` und in jedem Checkpoint, die eines D
 | 8 | `test_struct_att` | `collage128` | `--attention` | 20 Epochen | „nichts tun“-Falle: Maske meist zu, schaukelt zwischen unverändert und grün |
 | 9 | `A_struct5` | `collage128` | ohne Attention, λ_struct 5 | 20 Epochen | Züge erkennbar, aber ganzes Bild verrauscht und bunt gesprenkelt |
 | 10 | `B_att_struct3_cyc5` | `collage128` | Attention, λ_struct 3, λ_cycle 5 | 20 Epochen | **Maske findet das Gesicht**, echte Gurkenschale, Haare/Hintergrund sauber; Gesichtszüge fast weg |
+| 11 | `C_att_struct5_cyc5` | `collage128` | Attention, λ_struct 5, λ_cycle 5 | 20 Epochen | „nichts tun“: Gesichter unverändert |
+| 12 | `D_att_struct6_cyc7` | `collage128` | Attention, λ_struct 6, λ_cycle 7 | 20 Epochen | „nichts tun“: Gesichter unverändert |
+| 13 | `B_full_att_struct3_cyc5` | `collage128` | Einstellungen von #10, volles Training | 200 Epochen | läuft |
+| 14 | `B_full_att_struct4_cyc5` | `collage128` | wie #13, λ_struct 4 (zwischen offen und „nichts tun“) | 200 Epochen | läuft |
 
 ## Details
 
@@ -96,3 +100,30 @@ verrauscht und bunt gesprenkelt, Haare und Hintergrund leiden.
 **Entscheidung:** Attention behalten. Mitte suchen zwischen #8 (λ_struct 10, λ_cycle 10: tut nichts)
 und #10 (λ_struct 3, λ_cycle 5: Gesicht weg). Nächster Doppel-Kurztest:
 `C_att_struct5_cyc5` und `D_att_struct6_cyc7`.
+
+### 11–12: Mitte zwischen #8 und #10
+Doppel-Kurztest, beide mit Attention.
+
+**C_att_struct5_cyc5** und **D_att_struct6_cyc7**: Beide fallen in die „nichts tun“-Falle, Zeile 2
+ist praktisch identisch mit dem Original. Die Rückrichtung (Collage → Gesicht, Zeile 5) malt dagegen
+deutlich Gesichter in die Gurke: G_BA arbeitet, nur G_AB bleibt untätig.
+
+![C_att_struct5_cyc5, Epoche 20](docs/experiments/C_att_struct5_cyc5_epoch020.jpg)
+![D_att_struct6_cyc7, Epoche 20](docs/experiments/D_att_struct6_cyc7_epoch020.jpg)
+
+**Erkenntnis:** Mit Attention gibt es eine scharfe Kippstelle. Schon ab λ_struct 5 ist „Maske zu“
+günstiger als jede Änderung. Nur mit sehr lockeren Bremsen (#10) öffnet sich die Maske, dann gehen
+aber die Gesichtszüge verloren. Feineres Drehen an λ_struct allein findet vermutlich keinen guten
+Mittelweg.
+
+**Entscheidung:** Kein weiteres Feintuning, sondern die funktionierende Variante #10 voll trainieren
+(#13), parallel auf der zweiten GPU mit λ_struct 4 (#14). Kontrollbilder jeder Epoche und Checkpoints
+alle 10 Epochen erlauben, den besten Stand auszuwählen, falls die Gesichtszüge später verschwinden.
+
+**Ideen für später**, falls die vollen Läufe nicht reichen:
+- **Struktur-Aufwärmphase** (`--struct-warmup`): erst lockere Bremsen wie #10 (Maske lernt, wo das
+  Gesicht ist), dann λ_struct langsam erhöhen, damit die Gesichtszüge zurückkommen.
+- **Masken-Loss** (`--mask-target`, `--lambda-mask`): bestraft eine Maske, die im Mittel kleiner als
+  ein Zielwert (~0,4, Fläche der Gurke in den Collagen) ist. Gibt nicht vor, *wo* die Maske offen
+  ist, nur *wie groß* sie ungefähr ist. Verhindert die „nichts tun“-Falle.
+- **Resize-Upsampling** gegen das Gittermuster in der Maske (Patch `outputs/patches/attention_plus_upsample.diff`).

@@ -231,7 +231,8 @@ Selbsttest: `python src/models.py`
   - [x] Kurztest `struct_test` (Collage 66×86, `--lambda-struct 10 --cycle-noise 0.1`, 20 Epochen): **kein Überkleben mehr**, Gesichter werden grün, Augen/Brille/Nase/Mund bleiben sichtbar. Probleme: Hintergrund und Haare werden grünlich, feines Gittermuster über dem ganzen Bild (Schachbrett von `ConvTranspose2d`, evtl. robuster versteckte Information), pinke Flecken um die Augen.
   - [ ] Kurztest `test_struct_att`: zusätzlich nur `--attention` (Hintergrund wird durchgereicht). Eine Änderung, damit das Ergebnis eindeutig ist.
   - [ ] falls das Gittermuster im Gesicht bleibt: Kurztest mit Vergrößern + Faltung statt `ConvTranspose2d` (Odena et al. 2016, *Deconvolution and Checkerboard Artifacts*; gleiche Parameterzahl; vorbereitet als Patch)
-  - [ ] danach voller Lauf `collage66_struct10_att`
+  - [x] Kurztests mit Attention und verschiedenen λ (siehe EXPERIMENTS.md #8–#12): nur λ_struct 3 / λ_cycle 5 öffnet die Maske
+  - [ ] **Volle Läufe** `B_full_att_struct3_cyc5` und `B_full_att_struct4_cyc5` (parallel, je 200 Epochen)
 - [x] Fester Satz Testbilder in jeder Epoche umgewandelt und gespeichert (8 Gesichter + 8 Collagen)
 
 **Fertig, wenn:** Ein Checkpoint vorliegt, der erkennbar Gurkiges erzeugt.
