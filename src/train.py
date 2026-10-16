@@ -35,7 +35,7 @@ from tqdm import tqdm
 
 from dataset import UnpairedDataset
 from models import Discriminator, Generator, init_weights
-from utils import ImagePool, StructureLoss, linear_decay, sample_grid, save_grid, set_requires_grad
+from utils import ImagePool, StructureLoss, denormalize, linear_decay, sample_grid, save_grid, set_requires_grad
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +49,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-downsampling", type=int, default=2)
     p.add_argument("--n-res-blocks", type=int, default=6, help="6 für 128 px, 9 für 256 px")
     p.add_argument("--n-layers-d", type=int, default=3)
+    p.add_argument("--attention", action="store_true",
+                   help="Generator lernt eine Maske, wo er ändert; außerhalb wird die Eingabe durchgereicht")
     # Losses
     p.add_argument("--lambda-cycle", type=float, default=10.0)
     p.add_argument("--lambda-identity", type=float, default=0.5, help="relativ zu lambda-cycle")
@@ -88,7 +90,8 @@ def pick_device(name: str) -> torch.device:
 def build_models(cfg: dict) -> dict[str, nn.Module]:
     """Die vier Netze. G_AB: Gesicht -> Gurke, G_BA: Gurke -> Gesicht,
     D_A: echtes Gesicht?, D_B: echte Gurke?"""
-    gen = dict(ngf=cfg["ngf"], n_downsampling=cfg["n_downsampling"], n_res_blocks=cfg["n_res_blocks"])
+    gen = dict(ngf=cfg["ngf"], n_downsampling=cfg["n_downsampling"], n_res_blocks=cfg["n_res_blocks"],
+               attention=cfg.get("attention", False))   # .get: ältere Checkpoints kennen die Option nicht
     disc = dict(ndf=cfg["ndf"], n_layers=cfg["n_layers_d"])
     return {
         "G_AB": Generator(**gen),
@@ -248,6 +251,13 @@ def main() -> None:
         save_grid(grid, out_dir / "samples" / f"epoch_{epoch + 1:03d}.png", nrow=n_fixed)
         writer.add_image("samples", make_grid(grid.cpu(), nrow=n_fixed), epoch + 1)
         writer.add_scalar("lr", opt_G.param_groups[0]["lr"], epoch + 1)
+        if args.attention:   # gelernte Maske von G_AB: hell = wird zu Gurke, dunkel = bleibt
+            with torch.no_grad():
+                G_AB.eval()
+                mask = G_AB.forward_with_mask(fixed_A)[1].repeat(1, 3, 1, 1)
+                G_AB.train()
+            save_grid(torch.cat([denormalize(fixed_A), mask]), out_dir / "samples" / f"mask_{epoch + 1:03d}.png",
+                      nrow=n_fixed)
 
         ckpt = {
             "config": cfg, "epoch": epoch, "step": step,

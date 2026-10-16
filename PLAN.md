@@ -111,7 +111,7 @@ Die meisten Fehler passieren hier: welcher Loss welches Netz updatet, wo `detach
 | `src/utils.py` | `ImagePool`, LR-Schedule, Bilder speichern, Denormalisierung |
 | `src/train.py` | Losses, Trainingsloop, Logging, Checkpoints, Config |
 | `src/infer.py` | Bild oder Ordner rein, Gurkengesicht raus |
-| `src/evaluate.py` | KID/FID auf test |
+| `src/compare.py` | Vergleichsraster mehrerer Checkpoints |
 | `scripts/prepare_data.py` | Zuschneiden, Skalieren, Deduplizieren, Split |
 
 ### Grundregel: alles konfigurierbar
@@ -227,16 +227,24 @@ Selbsttest: `python src/models.py`
 - [ ] **Lauf 2** (`collage66`): Collage 66×86 %, dazu
   - `--lambda-struct 10`: **Struktur-Loss**, grobe Kanten (Graustufen, 1/4 Auflösung, Sobel, pro Bild normiert) von Gesicht und Gurkengesicht müssen übereinstimmen. Umfärben kostet fast nichts (0,035), Gesicht verschwinden lassen kostet viel (0,38 × λ).
   - `--cycle-noise 0.1`: **Rauschen** vor dem Rückweg, zerstört versteckte Feinmuster
-  - erst Kurztest `struct_test` (20 Epochen, ~45 min), dann voller Lauf
+  - `--attention`: Der Generator lernt zusätzlich eine **Maske** und mischt `Maske × neu + (1 − Maske) × Eingabe`. Außerhalb der Maske wird das Original durchgereicht (Haare, Hintergrund scharf). Die Maske wird nicht vorgegeben, das Netz lernt selbst, wo es ändert. Vorbild: GANimation (Pumarola et al. 2018), AttentionGAN (Tang et al. 2019), Mejjati et al. 2018. Kontrollbild `mask_XXX.png` pro Epoche.
+  - [x] Kurztest `struct_test` (Collage 66×86, `--lambda-struct 10 --cycle-noise 0.1`, 20 Epochen): **kein Überkleben mehr**, Gesichter werden grün, Augen/Brille/Nase/Mund bleiben sichtbar. Probleme: Hintergrund und Haare werden grünlich, feines Gittermuster über dem ganzen Bild (Schachbrett von `ConvTranspose2d`, evtl. robuster versteckte Information), pinke Flecken um die Augen.
+  - [ ] Kurztest `test_struct_att`: zusätzlich nur `--attention` (Hintergrund wird durchgereicht). Eine Änderung, damit das Ergebnis eindeutig ist.
+  - [ ] falls das Gittermuster im Gesicht bleibt: Kurztest mit Vergrößern + Faltung statt `ConvTranspose2d` (Odena et al. 2016, *Deconvolution and Checkerboard Artifacts*; gleiche Parameterzahl; vorbereitet als Patch)
+  - [ ] danach voller Lauf `collage66_struct10_att`
 - [x] Fester Satz Testbilder in jeder Epoche umgewandelt und gespeichert (8 Gesichter + 8 Collagen)
 
 **Fertig, wenn:** Ein Checkpoint vorliegt, der erkennbar Gurkiges erzeugt.
 
-### Phase 6: Evaluation
-- [ ] `infer.py`
-- [ ] KID (bei wenigen Bildern zuverlässiger) und FID auf test, z. B. mit `torchmetrics` oder `torch-fidelity`
+### Phase 6: Anwenden und Vergleichen
+Ziel des Projekts sind lustige Gurkengesichter, Bewertung per Auge. Deshalb nur, was dafür nötig ist:
+- [ ] `infer.py`: Foto oder Ordner rein, Gurkengesicht raus
+  - Gesicht finden und **wie FFHQ ausrichten und zuschneiden** (Landmarken für Augen, Nase, Mund, z. B. MediaPipe; Vorbild: Ausrichtungsskript von FFHQ). Ohne das funktionieren normale Handyfotos nicht.
+  - Checkpoint laden, Netz aus der gespeicherten Config bauen, G_AB anwenden
+  - optional: Gurkengesicht zurück ins Originalfoto setzen
+- [ ] `compare.py`: dieselben Testgesichter durch mehrere Checkpoints/Epochen schicken, als Bildraster nebeneinander (zum Auswählen des lustigsten Checkpoints)
 
-**Fertig, wenn:** Für die Baseline eine Zahl und ein Bildgrid vorliegen.
+**Fertig, wenn:** Aus einem normalen Foto ein Gurkengesicht wird und ein Vergleichsraster der Läufe vorliegt.
 
 ### Phase 7: Experimente (je nur **eine** Änderung gegenüber der Baseline)
 Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der besten Variante sind dadurch leicht optimistisch; bei Bedarf später einen Teil von train als val abzweigen.
@@ -251,9 +259,10 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
 - [ ] DiffAugment (wenig Gurkendaten)
 - [ ] **Auflösung auf 256×256 erhöhen** (mit 9 Res-Blöcken), Gurkendaten in passender Qualität nötig
 - [ ] Optional: Vergleich mit CUT (Park et al. 2020) oder U-GAT-IT (Kim et al. 2020)
+- [ ] Optional: Zahlen statt Augenmaß, falls viele Varianten verglichen werden oder das Projekt bewertet wird: **KID** (wie echt/gurkig, mit `torchmetrics` oder `torch-fidelity`) plus **Struktur-Abstand** (wie viel Gesicht erhalten bleibt). Beide zusammen zeigen den Zielkonflikt, z. B. als Kurve über λ_struct.
 
 ### Phase 8: Abschluss
-- [ ] Finale Ergebnisse auf dem Test-Set
+- [ ] Finale Ergebnisse auf dem Test-Set und Fotos von Freunden (mit deren Einverständnis)
 - [ ] README mit Beispielbildern, Ergebnissen und Anleitung zum Reproduzieren
 
 ---
@@ -271,7 +280,7 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
   4. Modell mit eigener Aufmerksamkeit, z. B. U-GAT-IT (siehe Phase 7).
 
   **Entscheidung:** keine Maske (nimmt den Gag), stattdessen die Gurkendomäne angepasst: Collagen (siehe Phase 1). Neues Risiko: Die Collagen haben keine Augen und keinen Mund. Der Diskriminator drängt darauf, sie verschwinden zu lassen, der Cycle-Loss will sie behalten. Außerdem kann der Collage-Look (Kanten, Licht) mitgelernt werden.
-- **Schachbrettmuster:** `ConvTranspose2d` im Decoder kann Checkerboard-Artefakte erzeugen. Falls sichtbar: durch Hochskalieren + normale Faltung ersetzen.
+- **Schachbrettmuster:** `ConvTranspose2d` im Decoder kann Checkerboard-Artefakte erzeugen. Im Kurztest `struct_test` sichtbar geworden (oder robuster versteckte Information). Gegenmittel Vergrößern + Faltung, erst testen, falls es nach der Attention im Gesicht bleibt.
 
 ## 5. Weiterführende Literatur
 

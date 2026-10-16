@@ -31,11 +31,18 @@ class ResidualBlock(nn.Module):
 
 
 class Generator(nn.Module):
-    """Encoder -> Residual-Blöcke -> Decoder. Ausgabe hat dieselbe Größe wie die Eingabe."""
+    """Encoder -> Residual-Blöcke -> Decoder. Ausgabe hat dieselbe Größe wie die Eingabe.
+
+    attention=True (wie GANimation / AttentionGAN): Der Generator gibt zusätzlich eine Maske
+    (0..1 pro Pixel) aus und mischt: Maske * neues Bild + (1 - Maske) * Eingabe. Wo die Maske 0
+    ist, wird die Eingabe unverändert durchgereicht. Wo geändert wird, lernt das Netz selbst.
+    """
 
     def __init__(self, in_channels: int = 3, out_channels: int = 3, ngf: int = 64,
-                 n_downsampling: int = 2, n_res_blocks: int = 6):
+                 n_downsampling: int = 2, n_res_blocks: int = 6, attention: bool = False):
         super().__init__()
+        self.attention = attention
+        self.out_channels = out_channels
         layers = [
             nn.ReflectionPad2d(3),
             nn.Conv2d(in_channels, ngf, kernel_size=7),
@@ -68,13 +75,23 @@ class Generator(nn.Module):
 
         layers += [
             nn.ReflectionPad2d(3),
-            nn.Conv2d(channels, out_channels, kernel_size=7),
-            nn.Tanh(),  # Ausgabe in [-1, 1], passend zur Normalisierung der Bilder
+            nn.Conv2d(channels, out_channels + (1 if attention else 0), kernel_size=7),
         ]
+        if not attention:
+            layers.append(nn.Tanh())  # Ausgabe in [-1, 1], passend zur Normalisierung der Bilder
         self.model = nn.Sequential(*layers)
 
+    def forward_with_mask(self, x: torch.Tensor):
+        """(Ergebnis, Maske); Maske ist None ohne attention."""
+        out = self.model(x)
+        if not self.attention:
+            return out, None
+        content = torch.tanh(out[:, :self.out_channels])      # neu gemaltes Bild in [-1, 1]
+        mask = torch.sigmoid(out[:, self.out_channels:])       # 1 Kanal, 0 = Eingabe behalten
+        return mask * content + (1 - mask) * x, mask
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.model(x)
+        return self.forward_with_mask(x)[0]
 
 
 class Discriminator(nn.Module):
