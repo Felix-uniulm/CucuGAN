@@ -267,6 +267,10 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
 
 ---
 
+**Alle Läufe mit Einstellungen, Ergebnissen und Entscheidungen: [EXPERIMENTS.md](EXPERIMENTS.md).**
+
+---
+
 ## 4. Erwartungen und Risiken
 
 - **Form vs. Textur:** CycleGAN verändert vor allem Farbe und Oberfläche. Realistisch sind grüne, genoppte Gesichter, keine Gesichter in Gurkenform.
