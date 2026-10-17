@@ -25,8 +25,8 @@ zusätzlich in `outputs/<name>/config.json` und in jedem Checkpoint, die eines D
 | 10 | `B_att_struct3_cyc5` | `collage128` | Attention, λ_struct 3, λ_cycle 5 | 20 Epochen | **Maske findet das Gesicht**, echte Gurkenschale, Haare/Hintergrund sauber; Gesichtszüge fast weg |
 | 11 | `C_att_struct5_cyc5` | `collage128` | Attention, λ_struct 5, λ_cycle 5 | 20 Epochen | „nichts tun“: Gesichter unverändert |
 | 12 | `D_att_struct6_cyc7` | `collage128` | Attention, λ_struct 6, λ_cycle 7 | 20 Epochen | „nichts tun“: Gesichter unverändert |
-| 13 | `B_full_att_struct3_cyc5` | `collage128` | Einstellungen von #10, volles Training | 200 Epochen | läuft |
-| 14 | `B_full_att_struct4_cyc5` | `collage128` | wie #13, λ_struct 4 (zwischen offen und „nichts tun“) | 200 Epochen | läuft |
+| 13 | `B_full_att_struct3_cyc5` | `collage128` | Einstellungen von #10, volles Training | 200 Epochen | keine Gurke mehr: Gesicht mit buntem Rauschmuster (verstecktes Kodieren) |
+| 14 | `B_full_att_struct4_cyc5` | `collage128` | wie #13, λ_struct 4 (zwischen offen und „nichts tun“) | 200 Epochen | „nichts tun“: Gesichter unverändert |
 
 ## Details
 
@@ -127,3 +127,23 @@ alle 10 Epochen erlauben, den besten Stand auszuwählen, falls die Gesichtszüge
   ein Zielwert (~0,4, Fläche der Gurke in den Collagen) ist. Gibt nicht vor, *wo* die Maske offen
   ist, nur *wie groß* sie ungefähr ist. Verhindert die „nichts tun“-Falle.
 - **Resize-Upsampling** gegen das Gittermuster in der Maske (Patch `outputs/patches/attention_plus_upsample.diff`).
+
+### 13–14: Volle Läufe mit Attention
+Parallel auf zwei T4, je 200 Epochen.
+
+**B_full_att_struct3_cyc5:** Die nach 20 Epochen offene Maske mit Gurkenschale (#10) hat sich nicht
+gehalten. Nach 200 Epochen bleibt das Gesicht erhalten, aber mit einem feinen bunten Rauschmuster
+überzogen, keine Gurke. Das Muster ist vermutlich wieder verstecktes Kodieren: Der Generator gewinnt
+gegen den Diskriminator über unsichtbare Feinmuster statt über echte Gurkenschale. In Zeile 6 wird
+aus der Collage beim Rückweg ebenfalls keine Gurke mehr.
+
+![B_full_att_struct3_cyc5, Epoche 200](docs/experiments/B_full_att_struct3_cyc5_epoch200.jpg)
+
+**B_full_att_struct4_cyc5:** „Nichts tun“, Gesichter unverändert (wie #11, #12).
+
+![B_full_att_struct4_cyc5, Epoche 200](docs/experiments/B_full_att_struct4_cyc5_epoch200.jpg)
+
+**Erkenntnis:** Mit Attention gibt es nur „Maske zu“ oder einen instabilen Zustand, der im langen
+Training in Rauschmuster kippt. Feintuning der λ hilft nicht mehr. Nächster Schritt: das Problem
+direkt angehen (Masken-Loss) oder ein anderes Verfahren (CUT, ohne Rückweg, also ohne
+verstecktes Kodieren).
