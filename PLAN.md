@@ -268,6 +268,13 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
 
 ---
 
+### Wechsel auf CUT (Branch `cut`)
+Nach 14 Läufen mit CycleGAN (siehe EXPERIMENTS.md) findet das Netz immer einen Ausweg statt einer echten Verwandlung: Gurke drüberkleben und Gesicht verstecken, gar nichts tun (mit Attention) oder unsichtbare Rauschmuster. Ursache ist der Rückweg (Cycle-Loss), über den sich Information verstecken lässt.
+
+**CUT** (Park et al. 2020, *Contrastive Learning for Unpaired Image-to-Image Translation*, ECCV): nur ein Generator und ein Diskriminator, **kein Rückweg**. Inhalt bleibt über **PatchNCE** erhalten: An ~256 zufälligen Stellen soll das Merkmal im Gurkengesicht dem an derselben Stelle im Original ähnlicher sein als allen anderen Stellen (Kreuzentropie, Temperatur 0,07). Merkmale aus Encoder-Schichten des Generators, projiziert mit einem kleinen MLP (`PatchSampleF`). Identitäts-NCE auf den Collagen ersetzt den Identity-Loss.
+- [x] `src/train_cut.py`, `Generator.encode`, `PatchSampleF`, `patch_nce_loss`; gleiche Netze wie bisher, Optionen `--attention`, `--lambda-struct` übernehmbar. CPU: ~1,0 s/Schritt statt 2,2 (CycleGAN).
+- [ ] Doppel-Kurztest `cut_test` (Paper-Standard) und `cut_att_test` (+ Attention)
+
 **Alle Läufe mit Einstellungen, Ergebnissen und Entscheidungen: [EXPERIMENTS.md](EXPERIMENTS.md).**
 
 ---

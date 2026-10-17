@@ -76,6 +76,36 @@ class StructureLoss(nn.Module):
         return nn.functional.l1_loss(self.edges(fake), self.edges(real))
 
 
+def patch_nce_loss(feat_q: torch.Tensor, feat_k: torch.Tensor, batch_size: int, tau: float = 0.07) -> torch.Tensor:
+    """CUT: Für jede Stelle im Gurkengesicht (q) soll die passende Stelle im Original (k+) unter
+    allen anderen Stellen desselben Bildes (Negative) wiedererkannt werden. Kreuzentropie über
+    Ähnlichkeiten; die richtige Antwort ist immer Index 0.
+
+    feat_q, feat_k: (B*N) x dim, normiert; k wird nicht trainiert (detach)."""
+    feat_k = feat_k.detach()
+    n = feat_q.shape[0] // batch_size
+    q = feat_q.view(batch_size, n, -1)
+    k = feat_k.view(batch_size, n, -1)
+    l_pos = (q * k).sum(dim=2, keepdim=True)                     # B x N x 1: dieselbe Stelle
+    l_neg = torch.bmm(q, k.transpose(1, 2))                      # B x N x N: alle Stellen
+    eye = torch.eye(n, device=q.device, dtype=torch.bool)[None]
+    l_neg = l_neg.masked_fill(eye, -10.0)                        # Diagonale ist der Positive, nicht doppelt zählen
+    logits = torch.cat([l_pos, l_neg], dim=2).flatten(0, 1) / tau
+    target = torch.zeros(logits.shape[0], dtype=torch.long, device=q.device)
+    return nn.functional.cross_entropy(logits, target)
+
+
+@torch.no_grad()
+def sample_grid_cut(G: nn.Module, real_A: torch.Tensor, real_B: torch.Tensor) -> torch.Tensor:
+    """Kontrollbild CUT: Zeilen echt A, fake B (Gurkengesicht), echt B, G(echt B) (Identität)."""
+    was_training = G.training
+    G.eval()
+    rows = [real_A, G(real_A), real_B, G(real_B)]
+    if was_training:
+        G.train()
+    return denormalize(torch.cat(rows))
+
+
 def set_requires_grad(nets: list[nn.Module], requires_grad: bool) -> None:
     """Gradienten für Netze ein- oder ausschalten (spart Rechenzeit, verhindert falsche Updates)."""
     for net in nets:

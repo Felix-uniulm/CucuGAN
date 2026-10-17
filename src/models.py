@@ -93,6 +93,42 @@ class Generator(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.forward_with_mask(x)[0]
 
+    def encode(self, x: torch.Tensor, layer_ids: list[int]) -> list[torch.Tensor]:
+        """Zwischenergebnisse nach den Schichten layer_ids (Index in self.model), für CUT/PatchNCE.
+        Rechnet nur so weit wie nötig."""
+        feats = []
+        for i, layer in enumerate(self.model):
+            x = layer(x)
+            if i in layer_ids:
+                feats.append(x)
+            if i >= max(layer_ids):
+                break
+        return feats
+
+
+class PatchSampleF(nn.Module):
+    """CUT: zieht an zufälligen Stellen Merkmale aus mehreren Schichten und projiziert sie mit je
+    einem kleinen MLP auf normierte Vektoren. Dieselben Stellen (patch_ids) werden für das Original
+    und das Gurkengesicht verwendet, damit man sie vergleichen kann."""
+
+    def __init__(self, in_channels: list[int], dim: int = 256):
+        super().__init__()
+        self.mlps = nn.ModuleList(
+            nn.Sequential(nn.Linear(c, dim), nn.ReLU(inplace=True), nn.Linear(dim, dim)) for c in in_channels)
+
+    def forward(self, feats: list[torch.Tensor], num_patches: int, patch_ids: list | None = None):
+        out, ids_out = [], []
+        for k, (feat, mlp) in enumerate(zip(feats, self.mlps)):
+            flat = feat.flatten(2).permute(0, 2, 1)                 # B x (H*W) x C
+            if patch_ids is None:
+                ids = torch.randperm(flat.shape[1], device=feat.device)[:num_patches]
+            else:
+                ids = patch_ids[k]
+            x = mlp(flat[:, ids].flatten(0, 1).float())             # (B*N) x dim, in 32 Bit
+            out.append(nn.functional.normalize(x, dim=1))
+            ids_out.append(ids)
+        return out, ids_out
+
 
 class Discriminator(nn.Module):
     """PatchGAN: gibt eine Karte aus, jeder Wert bewertet einen ~70x70-Ausschnitt als echt/fake."""
