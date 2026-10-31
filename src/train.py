@@ -4,8 +4,8 @@ Beispiele:
     # Overfit-Test auf 20 Bildern (CPU)
     python src/train.py --name overfit --max-images 20 --n-epochs 100 --n-epochs-decay 0 --pool-size 0
 
-    # Baseline mit Paper-Werten
-    python src/train.py --name baseline --data data/processed/128
+    # Vollständige Baseline mit Paper-Werten auf den Schalenquadraten
+    python src/train.py --name baseline_squares --data data/processed/squares128
 
     # Abgebrochenes Training fortsetzen
     python src/train.py --name baseline --resume
@@ -40,7 +40,8 @@ from utils import ImagePool, linear_decay, sample_grid, save_grid, set_requires_
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--name", required=True, help="Name des Laufs (Ordner für Checkpoints und Ausgaben)")
-    p.add_argument("--data", default="data/processed/128", help="Ordner mit train/ und test/")
+    p.add_argument("--data", default="data/processed/squares128",
+                   help="Ordner mit train/ und test/")
     p.add_argument("--max-images", type=int, default=None, help="nur N Bilder pro Domäne (Overfit-Test)")
     # Netze
     p.add_argument("--ngf", type=int, default=64, help="Basiskanäle Generator")

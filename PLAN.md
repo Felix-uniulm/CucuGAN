@@ -154,11 +154,11 @@ Konkret heißt das:
 - [x] Exakte Duplikate entfernen (md5): FFHQ 0, Jin 0
 - [x] Split train/test etwa 90/10 pro **Originalfoto** über einen Hash des Dateinamens (stabil, auch beim späteren Neuerzeugen in 256 px)
 - [x] Gurken: Gurke finden (nur grüne Farbtöne, Farbkarten als Rechtecke ausgeschlossen), waagerecht drehen, quadratische Ausschnitte entlang der Gurke schneiden (Ausschnitte erben den Split ihres Fotos)
-- [x] Auf 128×128 skalieren: `python scripts/prepare_data.py build --size 128`
+- [x] Auf 128×128 skalieren: `python scripts/prepare_data.py build --mode squares --size 128`
 
 Reihenfolge: Duplikate entfernen → Split → Zuschneiden. Wie in den Original-Datensätzen von CycleGAN gibt es nur train und test (kein val), siehe Phase 7.
 
-Ergebnis `data/processed/128/` (Herkunft jedes Bildes in `manifest.csv`):
+Ergebnis `data/processed/squares128/` (Herkunft jedes Bildes in `manifest.csv`):
 
 | | train | test |
 |---|---|---|
