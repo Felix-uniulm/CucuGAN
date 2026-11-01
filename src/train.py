@@ -10,6 +10,10 @@ Beispiele:
     # Abgebrochenes Training fortsetzen
     python src/train.py --name baseline --resume
 
+    # Trainiertes Modell auf ein 128x128-Bild anwenden
+    python src/infer.py --checkpoint checkpoints/baseline_squares_2k/latest.pt \
+        --input input/face.png --output outputs/inference/face_cucumber.png
+
 Ablage:
     checkpoints/<name>/latest.pt        letzter Stand (zum Fortsetzen)
     checkpoints/<name>/epoch_XXX.pt     Zwischenstände
