@@ -8,6 +8,8 @@ Selbsttest (speichert einen Batch als Bild):
     python src/dataset.py --root data/processed/squares128
 """
 
+from __future__ import annotations
+
 import argparse
 import random
 from pathlib import Path
