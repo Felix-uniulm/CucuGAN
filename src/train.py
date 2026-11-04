@@ -38,7 +38,8 @@ from tqdm import tqdm
 
 from dataset import UnpairedDataset
 from models import Discriminator, Generator, init_weights
-from utils import ImagePool, linear_decay, sample_grid, save_grid, set_requires_grad
+from utils import (ImagePool, StructureLoss, linear_decay, sample_grid, save_grid,
+                   set_requires_grad)
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +57,8 @@ def parse_args() -> argparse.Namespace:
     # Losses
     p.add_argument("--lambda-cycle", type=float, default=10.0)
     p.add_argument("--lambda-identity", type=float, default=0.5, help="relativ zu lambda-cycle")
+    p.add_argument("--lambda-struct", type=float, default=0.0,
+                   help="Gewicht für grobe Gesichts-Kanten im Gurkenbild; 0 = aus")
     # Optimierung
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--beta1", type=float, default=0.5)
@@ -141,6 +144,7 @@ def main() -> None:
 
     gan_loss = nn.MSELoss()   # LSGAN: Abstand zum Sollwert 1 (echt) bzw. 0 (fake)
     l1 = nn.L1Loss()          # Cycle und Identity: mittlere absolute Pixelabweichung
+    structure_loss = StructureLoss().to(device)
     pool_A, pool_B = ImagePool(args.pool_size), ImagePool(args.pool_size)
 
     start_epoch, step = 0, 0
@@ -188,7 +192,9 @@ def main() -> None:
                     l1(G_AB(real_B), real_B) + l1(G_BA(real_A), real_A))
             else:
                 loss_idt = torch.zeros((), device=device)
-            loss_G = loss_gan + loss_cycle + loss_idt
+            loss_struct = args.lambda_struct * structure_loss(fake_B.float(), real_A.float()) \
+                if args.lambda_struct > 0 else torch.zeros((), device=device)
+            loss_G = loss_gan + loss_cycle + loss_idt + loss_struct
             loss_G.backward()
             opt_G.step()
 
@@ -206,7 +212,8 @@ def main() -> None:
 
             # 3) Logging
             step += 1
-            for k, v in (("G_gan", loss_gan), ("G_cycle", loss_cycle), ("G_identity", loss_idt), ("D", loss_D)):
+            for k, v in (("G_gan", loss_gan), ("G_cycle", loss_cycle),
+                         ("G_identity", loss_idt), ("G_struct", loss_struct), ("D", loss_D)):
                 running[k] = running.get(k, 0.0) + v.item()
             if step % args.log_every == 0:
                 for k, v in running.items():

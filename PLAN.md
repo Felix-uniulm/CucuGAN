@@ -213,6 +213,7 @@ Da es kein val-Set gibt, werden die Varianten auf test verglichen. Die Werte der
 
 - [ ] λ_cycle variieren (z. B. 5 oder 2): mehr Freiheit für Formänderungen
 - [ ] λ_identity variieren
+- [ ] Struktur-Loss für sichtbare Gesichtskanten testen (`--lambda-struct 3`)
 - [ ] DiffAugment (wenig Gurkendaten)
 - [ ] **Auflösung auf 256×256 erhöhen** (mit 9 Res-Blöcken), Gurkendaten in passender Qualität nötig
 - [ ] Optional: Vergleich mit CUT (Park et al. 2020) oder U-GAT-IT (Kim et al. 2020)

@@ -4,6 +4,7 @@ import random
 from pathlib import Path
 
 import torch
+import torch.nn.functional as functional
 from torch import nn
 from torchvision.utils import save_image
 
@@ -41,6 +42,29 @@ class ImagePool:
             else:                                  # neues Bild direkt benutzen
                 out.append(img)
         return torch.cat(out)
+
+
+class StructureLoss(nn.Module):
+    """Preserve coarse image edges while allowing fine cucumber texture."""
+
+    def __init__(self, scale: int = 4):
+        super().__init__()
+        gx = torch.tensor([[-1.0, 0.0, 1.0],
+                           [-2.0, 0.0, 2.0],
+                           [-1.0, 0.0, 1.0]])
+        self.scale = scale
+        self.register_buffer("kernels", torch.stack([gx, gx.t()]).unsqueeze(1))
+
+    def edges(self, x: torch.Tensor) -> torch.Tensor:
+        gray = (0.299 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2]).unsqueeze(1)
+        small = functional.avg_pool2d(gray, self.scale)
+        padded = functional.pad(small, (1, 1, 1, 1), mode="replicate")
+        gradients = functional.conv2d(padded, self.kernels.to(dtype=x.dtype))
+        edges = torch.sqrt(gradients.square().sum(dim=1) + 1e-6)
+        return edges / (edges.mean(dim=(1, 2), keepdim=True) + 1e-3)
+
+    def forward(self, fake: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
+        return functional.l1_loss(self.edges(fake), self.edges(real))
 
 
 def linear_decay(n_epochs: int, n_epochs_decay: int):
