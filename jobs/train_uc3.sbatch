@@ -22,6 +22,8 @@ DATA_PATH="$TMPDIR/$DATA_NAME"
 RUN="${RUN:-baseline_squares_2k}"
 MAX_IMAGES="${MAX_IMAGES:-2000}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
+N_EPOCHS="${N_EPOCHS:-100}"
+N_EPOCHS_DECAY="${N_EPOCHS_DECAY:-100}"
 TRAIN_EXTRA="${TRAIN_EXTRA:-}"
 
 mkdir -p logs
@@ -38,6 +40,7 @@ echo "Host: $(hostname)"
 echo "Run: $RUN"
 echo "Data: $DATA_PATH"
 echo "Max images: $MAX_IMAGES"
+echo "Epochs: $N_EPOCHS + $N_EPOCHS_DECAY decay"
 echo "Extra args: ${TRAIN_EXTRA:-<none>}"
 echo "Start: $(date --iso-8601=seconds)"
 nvidia-smi --query-gpu=name,memory.total --format=csv
@@ -47,8 +50,8 @@ TRAIN_ARGS=(
     --name "$RUN"
     --data "$DATA_PATH"
     --max-images "$MAX_IMAGES"
-    --n-epochs 100
-    --n-epochs-decay 100
+    --n-epochs "$N_EPOCHS"
+    --n-epochs-decay "$N_EPOCHS_DECAY"
     --batch-size 1
     --pool-size 50
     --device cuda
