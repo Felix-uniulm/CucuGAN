@@ -20,6 +20,9 @@ WS=$(ws_find cucugan)
 DATA_NAME="squares128"
 DATA_PATH="$TMPDIR/$DATA_NAME"
 RUN="${RUN:-baseline_squares_2k}"
+MAX_IMAGES="${MAX_IMAGES:-2000}"
+SAVE_EVERY="${SAVE_EVERY:-10}"
+TRAIN_EXTRA="${TRAIN_EXTRA:-}"
 
 mkdir -p logs
 mkdir -p "$WS/checkpoints" "$WS/outputs"
@@ -34,6 +37,8 @@ echo "Job: $SLURM_JOB_ID"
 echo "Host: $(hostname)"
 echo "Run: $RUN"
 echo "Data: $DATA_PATH"
+echo "Max images: $MAX_IMAGES"
+echo "Extra args: ${TRAIN_EXTRA:-<none>}"
 echo "Start: $(date --iso-8601=seconds)"
 nvidia-smi --query-gpu=name,memory.total --format=csv
 
@@ -41,14 +46,20 @@ TRAIN_ARGS=(
     src/train.py
     --name "$RUN"
     --data "$DATA_PATH"
-    --max-images 2000
+    --max-images "$MAX_IMAGES"
     --n-epochs 100
     --n-epochs-decay 100
     --batch-size 1
     --pool-size 50
     --device cuda
     --num-workers 6
+    --save-every "$SAVE_EVERY"
 )
+
+if [[ -n "$TRAIN_EXTRA" ]]; then
+    read -r -a EXTRA_ARGS <<< "$TRAIN_EXTRA"
+    TRAIN_ARGS+=("${EXTRA_ARGS[@]}")
+fi
 
 if [[ "${RESUME:-0}" == "1" ]]; then
     TRAIN_ARGS+=(--resume)
