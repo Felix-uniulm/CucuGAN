@@ -24,6 +24,7 @@ MAX_IMAGES="${MAX_IMAGES:-2000}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
 N_EPOCHS="${N_EPOCHS:-100}"
 N_EPOCHS_DECAY="${N_EPOCHS_DECAY:-100}"
+SEED="${SEED:-0}"
 TRAIN_EXTRA="${TRAIN_EXTRA:-}"
 
 mkdir -p logs
@@ -41,6 +42,7 @@ echo "Run: $RUN"
 echo "Data: $DATA_PATH"
 echo "Max images: $MAX_IMAGES"
 echo "Epochs: $N_EPOCHS + $N_EPOCHS_DECAY decay"
+echo "Seed: $SEED"
 echo "Extra args: ${TRAIN_EXTRA:-<none>}"
 echo "Start: $(date --iso-8601=seconds)"
 nvidia-smi --query-gpu=name,memory.total --format=csv
@@ -57,6 +59,7 @@ TRAIN_ARGS=(
     --device cuda
     --num-workers 6
     --save-every "$SAVE_EVERY"
+    --seed "$SEED"
 )
 
 if [[ -n "$TRAIN_EXTRA" ]]; then
