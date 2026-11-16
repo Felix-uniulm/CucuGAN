@@ -40,7 +40,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True,
                         help="Ausgabedatei oder Ausgabeordner")
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda oder mps")
-    return parser.parse_args()
+    parser.add_argument("--skin-mask", action="store_true",
+                        help="Nur Gesichtshaut und Nase ersetzen (Face Parsing)")
+    parser.add_argument("--face-model", default="jonathandinu/face-parsing",
+                        help="Hugging-Face-Modell-ID oder lokaler Modellordner")
+    parser.add_argument("--mask-feather", type=float, default=1.0,
+                        help="Weicher Maskenrand in Ausgabepixeln (Standard: 1)")
+    parser.add_argument("--save-mask", action="store_true", help="Hautmaske zusätzlich speichern")
+    args = parser.parse_args()
+    if args.mask_feather < 0:
+        parser.error("--mask-feather muss >= 0 sein")
+    if args.save_mask and not args.skin_mask:
+        parser.error("--save-mask benötigt --skin-mask")
+    return args
 
 
 def pick_device(name: str) -> torch.device:
@@ -107,12 +119,20 @@ def transform_image(path: Path) -> torch.Tensor:
 
 
 def convert_image(generator: torch.nn.Module, input_path: Path,
-                  output_path_: Path, device: torch.device) -> None:
+                  output_path_: Path, device: torch.device,
+                  face_mask=None, save_mask: bool = False) -> None:
     image = transform_image(input_path).to(device)
     with torch.inference_mode():
         result = generator(image)
+        mask = None
+        if face_mask is not None:
+            with Image.open(input_path) as original:
+                mask = face_mask(original.convert("RGB"))
+            result = mask * result + (1 - mask) * image
     output_path_.parent.mkdir(parents=True, exist_ok=True)
     save_image(((result + 1) / 2).clamp(0, 1), output_path_)
+    if save_mask and mask is not None:
+        save_image(mask, output_path_.with_name(output_path_.stem + "_mask.png"))
 
 
 def main() -> None:
@@ -121,10 +141,14 @@ def main() -> None:
     inputs = image_paths(args.input)
     generator = load_generator(args.checkpoint, device)
     multiple = len(inputs) > 1
+    face_mask = None
+    if args.skin_mask:
+        from face_mask import FaceMask
+        face_mask = FaceMask(device, args.face_model, args.mask_feather)
 
     for input_path in inputs:
         destination = output_path(args.output, input_path, multiple)
-        convert_image(generator, input_path, destination, device)
+        convert_image(generator, input_path, destination, device, face_mask, args.save_mask)
         print(f"{input_path} -> {destination}")
 
 

@@ -10,6 +10,9 @@ Beispiele:
     # Abgebrochenes Training fortsetzen
     python src/train.py --name baseline --resume
 
+    # Struktur-Loss auf die zentrierte Gesichtsregion fokussieren
+    python src/train.py --name struct_mask_test --lambda-struct 2 --struct-mask ellipse
+
     # Trainiertes Modell auf ein 128x128-Bild anwenden
     python src/infer.py --checkpoint checkpoints/baseline_squares_2k/latest.pt \
         --input input/face.png --output outputs/inference/face_cucumber.png
@@ -38,7 +41,7 @@ from tqdm import tqdm
 
 from dataset import UnpairedDataset
 from models import Discriminator, Generator, init_weights
-from utils import (ImagePool, StructureLoss, linear_decay, sample_grid, save_grid,
+from utils import (ImagePool, StructureLoss, linear_decay, masked_l1, sample_grid, save_grid,
                    set_requires_grad)
 
 
@@ -59,6 +62,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--lambda-identity", type=float, default=0.5, help="relativ zu lambda-cycle")
     p.add_argument("--lambda-struct", type=float, default=0.0,
                    help="Gewicht für grobe Gesichts-Kanten im Gurkenbild; 0 = aus")
+    p.add_argument("--struct-mask", choices=("none", "ellipse"), default="none",
+                   help="Maske für den Struktur-Loss; ellipse fokussiert auf die Gesichtsmitte")
+    p.add_argument("--skin-loss", action="store_true", help="Textur-Loss mit gespeicherten Hautmasken begrenzen")
+    p.add_argument("--lambda-outside", type=float, default=10.0,
+                   help="Erhaltungs-Loss außerhalb der Haut bei --skin-loss; 0 = aus")
+    p.add_argument("--texture-tiles", type=int, choices=(1, 2), default=1,
+                   help="B-Bilder als gespiegeltes 2×2-Raster verkleinern")
     # Optimierung
     p.add_argument("--lr", type=float, default=2e-4)
     p.add_argument("--beta1", type=float, default=0.5)
@@ -74,7 +84,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sample-every", type=int, default=0, help="zusätzlich alle N Schritte Bilder (0 = nur pro Epoche)")
     p.add_argument("--save-every", type=int, default=10, help="alle N Epochen einen Zwischenstand behalten")
     p.add_argument("--resume", action="store_true", help="von checkpoints/<name>/latest.pt fortsetzen")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.lambda_outside < 0:
+        p.error("--lambda-outside muss >= 0 sein")
+    return args
 
 
 def pick_device(name: str) -> torch.device:
@@ -113,8 +126,8 @@ def main() -> None:
     device = pick_device(args.device)
 
     # --- Daten -------------------------------------------------------------------------
-    train_ds = UnpairedDataset(args.data, "train", args.max_images)
-    test_ds = UnpairedDataset(args.data, "test")
+    train_ds = UnpairedDataset(args.data, "train", args.max_images, args.skin_loss, args.texture_tiles)
+    test_ds = UnpairedDataset(args.data, "test", skin_loss=args.skin_loss, texture_tiles=args.texture_tiles)
     with Image.open(train_ds.paths_a[0]) as img:
         cfg["image_size"] = img.width                       # für infer.py im Checkpoint
     loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
@@ -125,6 +138,8 @@ def main() -> None:
     fixed = [test_ds[i] for i in range(n_fixed)]
     fixed_A = torch.stack([f["A"] for f in fixed]).to(device)
     fixed_B = torch.stack([f["B"] for f in fixed]).to(device)
+    if args.skin_loss:
+        save_grid(torch.stack([f["mask_A"] for f in fixed]), out_dir / "skin_masks.png", nrow=n_fixed)
 
     # --- Netze, Optimizer, Lernraten-Plan -----------------------------------------------
     nets = build_models(cfg)
@@ -144,12 +159,17 @@ def main() -> None:
 
     gan_loss = nn.MSELoss()   # LSGAN: Abstand zum Sollwert 1 (echt) bzw. 0 (fake)
     l1 = nn.L1Loss()          # Cycle und Identity: mittlere absolute Pixelabweichung
-    structure_loss = StructureLoss().to(device)
+    structure_loss = StructureLoss(mask=args.struct_mask).to(device)
     pool_A, pool_B = ImagePool(args.pool_size), ImagePool(args.pool_size)
 
     start_epoch, step = 0, 0
     if args.resume:
         ckpt = torch.load(ckpt_dir / "latest.pt", map_location=device)
+        for key, default in (("skin_loss", False), ("texture_tiles", 1)):
+            if ckpt["config"].get(key, default) != cfg[key]:
+                raise ValueError(f"Resume mit geändertem {key} nicht erlaubt; neuen Laufnamen verwenden")
+        if args.skin_loss and ckpt["config"].get("lambda_outside", 0.0) != args.lambda_outside:
+            raise ValueError("Resume mit geändertem lambda_outside nicht erlaubt; neuen Laufnamen verwenden")
         for k, net in nets.items():
             net.load_state_dict(ckpt["nets"][k])
         opt_G.load_state_dict(ckpt["opt_G"])
@@ -172,6 +192,7 @@ def main() -> None:
         for batch in tqdm(loader, desc=f"Epoche {epoch + 1}/{total_epochs}", leave=False):
             real_A = batch["A"].to(device, non_blocking=True)
             real_B = batch["B"].to(device, non_blocking=True)
+            mask = batch["mask_A"].to(device, non_blocking=True) if args.skin_loss else None
 
             # 1) Generatoren: Diskriminatoren nur bewerten lassen, nicht mitlernen
             set_requires_grad([D_A, D_B], False)
@@ -182,7 +203,11 @@ def main() -> None:
             fake_A = G_BA(real_B)                     # Gurke -> Gesicht
             rec_B = G_AB(fake_A)                      # ... -> wieder Gurke
 
-            pred_fake_B = D_B(fake_B)                 # Generator will, dass D "echt" (1) sagt
+            # Gleiche Maskengeometrie und neutraler Hintergrund für echte/falsche Textur.
+            # Maskierung vor D verhindert Texturgradienten außerhalb der Haut.
+            texture_fake = fake_B * mask if mask is not None else fake_B
+            texture_real = real_B * mask if mask is not None else real_B
+            pred_fake_B = D_B(texture_fake)           # Generator will, dass D "echt" (1) sagt
             pred_fake_A = D_A(fake_A)
             loss_gan = gan_loss(pred_fake_B, torch.ones_like(pred_fake_B)) \
                 + gan_loss(pred_fake_A, torch.ones_like(pred_fake_A))
@@ -194,7 +219,9 @@ def main() -> None:
                 loss_idt = torch.zeros((), device=device)
             loss_struct = args.lambda_struct * structure_loss(fake_B.float(), real_A.float()) \
                 if args.lambda_struct > 0 else torch.zeros((), device=device)
-            loss_G = loss_gan + loss_cycle + loss_idt + loss_struct
+            loss_outside = args.lambda_outside * masked_l1(fake_B, real_A, 1 - mask) \
+                if mask is not None else torch.zeros((), device=device)
+            loss_G = loss_gan + loss_cycle + loss_idt + loss_struct + loss_outside
             loss_G.backward()
             opt_G.step()
 
@@ -202,7 +229,8 @@ def main() -> None:
             set_requires_grad([D_A, D_B], True)
             opt_D.zero_grad(set_to_none=True)
             loss_D = 0.0
-            for D, real, fake in ((D_A, real_A, pool_A.query(fake_A)), (D_B, real_B, pool_B.query(fake_B))):
+            for D, real, fake in ((D_A, real_A, pool_A.query(fake_A)),
+                                  (D_B, texture_real, pool_B.query(texture_fake))):
                 pred_real = D(real)
                 pred_fake = D(fake.detach())
                 loss_D = loss_D + 0.5 * (gan_loss(pred_real, torch.ones_like(pred_real))
@@ -213,7 +241,8 @@ def main() -> None:
             # 3) Logging
             step += 1
             for k, v in (("G_gan", loss_gan), ("G_cycle", loss_cycle),
-                         ("G_identity", loss_idt), ("G_struct", loss_struct), ("D", loss_D)):
+                         ("G_identity", loss_idt), ("G_struct", loss_struct),
+                         ("G_outside", loss_outside), ("D", loss_D)):
                 running[k] = running.get(k, 0.0) + v.item()
             if step % args.log_every == 0:
                 for k, v in running.items():

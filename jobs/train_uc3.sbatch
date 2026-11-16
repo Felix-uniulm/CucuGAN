@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/%x_%j.out
 
 set -euo pipefail
@@ -17,13 +17,17 @@ source .venv/bin/activate
 #   <workspace>/squares128/train/{A,B}
 #   <workspace>/squares128/test/{A,B}
 WS=$(ws_find cucugan)
-DATA_NAME="squares128"
+DATA_NAME="${DATA_NAME:-squares128}"
 DATA_PATH="$TMPDIR/$DATA_NAME"
 RUN="${RUN:-baseline_squares_2k}"
 MAX_IMAGES="${MAX_IMAGES:-2000}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
 N_EPOCHS="${N_EPOCHS:-100}"
 N_EPOCHS_DECAY="${N_EPOCHS_DECAY:-100}"
+STRUCT_MASK="${STRUCT_MASK:-none}"
+SKIN_LOSS="${SKIN_LOSS:-0}"
+TEXTURE_TILES="${TEXTURE_TILES:-1}"
+FACE_MODEL="${FACE_MODEL:-jonathandinu/face-parsing}"
 TRAIN_EXTRA="${TRAIN_EXTRA:-}"
 
 mkdir -p logs
@@ -31,19 +35,32 @@ mkdir -p "$WS/checkpoints" "$WS/outputs"
 ln -sfn "$WS/checkpoints" checkpoints
 ln -sfn "$WS/outputs" outputs
 
-# Use the node-local SSD for image reads.
-rm -rf "$DATA_PATH"
-cp -r "$WS/$DATA_NAME" "$DATA_PATH"
-
 echo "Job: $SLURM_JOB_ID"
 echo "Host: $(hostname)"
 echo "Run: $RUN"
 echo "Data: $DATA_PATH"
 echo "Max images: $MAX_IMAGES"
 echo "Epochs: $N_EPOCHS + $N_EPOCHS_DECAY decay"
+echo "Structure mask: $STRUCT_MASK"
+echo "Skin loss: $SKIN_LOSS; texture tiles: $TEXTURE_TILES"
 echo "Extra args: ${TRAIN_EXTRA:-<none>}"
 echo "Start: $(date --iso-8601=seconds)"
 nvidia-smi --query-gpu=name,memory.total --format=csv
+
+if [[ "$SKIN_LOSS" == "1" ]]; then
+    # Persist masks and model weights across jobs, including interrupted preparation.
+    export HF_HOME="${HF_HOME:-$WS/huggingface}"
+    echo "Preparing missing skin masks on GPU (model: $FACE_MODEL)"
+    python -u scripts/prepare_masks.py \
+        --data "$WS/$DATA_NAME" \
+        --device cuda \
+        --model "$FACE_MODEL" \
+        --threads "${SLURM_CPUS_PER_TASK:-4}"
+fi
+
+# Copy images together with the prepared masks to the node-local SSD.
+rm -rf "$DATA_PATH"
+cp -r "$WS/$DATA_NAME" "$DATA_PATH"
 
 TRAIN_ARGS=(
     src/train.py
@@ -57,7 +74,13 @@ TRAIN_ARGS=(
     --device cuda
     --num-workers 6
     --save-every "$SAVE_EVERY"
+    --struct-mask "$STRUCT_MASK"
+    --texture-tiles "$TEXTURE_TILES"
 )
+
+if [[ "$SKIN_LOSS" == "1" ]]; then
+    TRAIN_ARGS+=(--skin-loss)
+fi
 
 if [[ -n "$TRAIN_EXTRA" ]]; then
     read -r -a EXTRA_ARGS <<< "$TRAIN_EXTRA"

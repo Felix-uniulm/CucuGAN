@@ -155,6 +155,7 @@ Konkret heißt das:
 - [x] Split train/test etwa 90/10 pro **Originalfoto** über einen Hash des Dateinamens (stabil, auch beim späteren Neuerzeugen in 256 px)
 - [x] Gurken: Gurke finden (nur grüne Farbtöne, Farbkarten als Rechtecke ausgeschlossen), waagerecht drehen, quadratische Ausschnitte entlang der Gurke schneiden (Ausschnitte erben den Split ihres Fotos)
 - [x] Auf 128×128 skalieren: `python scripts/prepare_data.py build --mode squares --size 128`
+- [x] Weiche Ellipsenmaske für den Struktur-Loss auf ausgerichteten Gesichtern
 
 Reihenfolge: Duplikate entfernen → Split → Zuschneiden. Wie in den Original-Datensätzen von CycleGAN gibt es nur train und test (kein val), siehe Phase 7.
 

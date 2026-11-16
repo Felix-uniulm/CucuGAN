@@ -47,12 +47,15 @@ class ImagePool:
 class StructureLoss(nn.Module):
     """Preserve coarse image edges while allowing fine cucumber texture."""
 
-    def __init__(self, scale: int = 4):
+    def __init__(self, scale: int = 4, mask: str = "none"):
         super().__init__()
         gx = torch.tensor([[-1.0, 0.0, 1.0],
                            [-2.0, 0.0, 2.0],
                            [-1.0, 0.0, 1.0]])
         self.scale = scale
+        if mask not in {"none", "ellipse"}:
+            raise ValueError(f"Unbekannte Strukturmaske: {mask}")
+        self.mask = mask
         self.register_buffer("kernels", torch.stack([gx, gx.t()]).unsqueeze(1))
 
     def edges(self, x: torch.Tensor) -> torch.Tensor:
@@ -63,8 +66,31 @@ class StructureLoss(nn.Module):
         edges = torch.sqrt(gradients.square().sum(dim=1) + 1e-6)
         return edges / (edges.mean(dim=(1, 2), keepdim=True) + 1e-3)
 
+    def _ellipse_mask(self, shape: tuple[int, int, int], device: torch.device,
+                      dtype: torch.dtype) -> torch.Tensor:
+        _, height, width = shape
+        y = torch.linspace(-1.0, 1.0, height, device=device, dtype=dtype)
+        x = torch.linspace(-1.0, 1.0, width, device=device, dtype=dtype)
+        yy, xx = torch.meshgrid(y, x, indexing="ij")
+        # FFHQ faces are centered; a soft edge avoids an abrupt loss boundary.
+        radius = ((xx / 0.72).square() + (yy / 0.92).square()).sqrt()
+        return ((1.0 - radius) / 0.08).clamp(0.0, 1.0)
+
     def forward(self, fake: torch.Tensor, real: torch.Tensor) -> torch.Tensor:
-        return functional.l1_loss(self.edges(fake), self.edges(real))
+        fake_edges = self.edges(fake)
+        real_edges = self.edges(real)
+        if self.mask == "none":
+            return functional.l1_loss(fake_edges, real_edges)
+        mask = self._ellipse_mask(fake_edges.shape, fake_edges.device, fake_edges.dtype)
+        difference = (fake_edges - real_edges).abs() * mask
+        return difference.sum() / (mask.sum() * fake_edges.shape[0]).clamp_min(1e-6)
+
+
+def masked_l1(fake: torch.Tensor, real: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """L1 pro Bild nach ausgewählter Fläche und Kanalzahl normalisieren."""
+    difference = ((fake - real).abs() * mask).sum(dim=(1, 2, 3))
+    area = mask.sum(dim=(1, 2, 3)) * fake.shape[1]
+    return (difference / area.clamp_min(1e-6)).mean()
 
 
 def linear_decay(n_epochs: int, n_epochs_decay: int):
