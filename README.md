@@ -21,8 +21,8 @@ Verwendet wird nur der Ordner „Fruit Dataset“ (ganze Gurken mit Schale), nic
 
 ## Automatische Hautmaske bei der Inferenz
 
-Die optionale Face-Parsing-Maske übernimmt nur Gesichtshaut und Nase aus dem
-CycleGAN-Ergebnis. Augen, Augenbrauen, Lippen, Mund, Haare, Ohren, Hals und
+Die optionale Face-Parsing-Maske übernimmt Gesichtshaut, Nase, beide Ohren und Hals aus dem
+CycleGAN-Ergebnis. Augen, Augenbrauen, Lippen, Mund, Haare, Schmuck, Kleidung und
 Hintergrund bleiben aus dem Original erhalten. Die Maske wird aus dem Original
 berechnet, ihre Ränder werden ausschließlich innerhalb der Hautfläche geglättet.
 Das Training und bestehende Checkpoints bleiben unverändert.
@@ -67,7 +67,7 @@ allein verändert die Texturdichte eines vorhandenen Checkpoints nicht.
 
 ## Training mit Haut-Loss und gespiegelter 2×2-Textur
 
-Diese Variante begrenzt den Textur-Loss auf Haut und Nase. Zur Auswertung: `infer.py` ohne `--skin-mask` zeigt das rohe Ergebnis.
+Diese Variante begrenzt den Textur-Loss auf Gesichtshaut, Nase, Ohren und Hals. Zur Auswertung: `infer.py` ohne `--skin-mask` zeigt das rohe Ergebnis.
 Der Generator bleibt ein RGB-Netz; die Maske ist hier ausschließlich Zusatzinformation
 für Textur- und Erhaltungs-Loss, kein vierter Eingangskanal.
 
@@ -79,8 +79,8 @@ für Textur- und Erhaltungs-Loss, kein vierter Eingangskanal.
    ```
 
    Ohne GPU `--device cpu` verwenden. Die Dateien landen in
-   `<split>/masks_A/<ursprünglicher Dateiname>.png`, beispielsweise `00418.png.png`.
-   Sie enthalten binär nur Haut und Nase. Existierende Masken werden übersprungen;
+   `<split>/masks_A_skin_ears_neck/<ursprünglicher Dateiname>.png`, beispielsweise `00418.png.png`.
+   Sie enthalten binär `skin`, `nose`, `l_ear`, `r_ear` und `neck`. Existierende Masken werden übersprungen;
    nach Änderungen an Bildern müssen die betroffenen Masken neu erzeugt werden.
    Fehler bei der Segmentierung werden gemeldet und dürfen nicht durch Vollmasken
    ersetzt werden. Vor dem langen Lauf Masken visuell prüfen.
@@ -88,7 +88,7 @@ für Textur- und Erhaltungs-Loss, kein vierter Eingangskanal.
 2. Einen neuen Trainingslauf starten (Beispielwerte, noch nicht optimiert):
 
    ```bash
-   python src/train.py --name skin_tiles2 --data data/processed/squares128 \
+   python src/train.py --name skin_ears_neck_tiles2_full --data data/processed/squares128 \
      --skin-loss --texture-tiles 2 --lambda-outside 10 \
      --device cuda
    ```
@@ -99,8 +99,8 @@ für Textur- und Erhaltungs-Loss, kein vierter Eingangskanal.
    Im Workspace reichen zunächst die A/B-Bilder:
 
    ```bash
-   SKIN_LOSS=1 TEXTURE_TILES=2 RUN=skin_tiles2 \
-     sbatch jobs/train_uc3.sbatch
+   mkdir -p logs
+   sbatch jobs/train_uc3.sbatch
    ```
 
    Fehlende Masken werden zuerst auf der GPU direkt im Workspace gespeichert,
@@ -146,3 +146,55 @@ zeigen weiterhin rohe Generatorbilder, damit unerwünschte Änderungen sichtbar 
 Für einen sinnvollen Vergleich zuerst `--texture-tiles 1` gegen `2` bei denselben
 Loss-Gewichten und demselben Seed testen. Ein Funktionstest ersetzt noch keine
 Bewertung eines vollständig trainierten Modells.
+
+## Voller Clusterlauf mit Ohren und Hals
+
+`jobs/train_uc3.sbatch` startet standardmäßig einen neuen Lauf
+`skin_ears_neck_tiles2_full` mit folgenden Einstellungen:
+
+| Einstellung | Wert |
+|---|---|
+| Datensatz | squares128, alle A- und B-Trainingsbilder (kein 2.000-Bilder-Limit) |
+| Epochen | 100 konstante Lernrate + 100 mit linearem Decay |
+| Hautmaske | Gesichtshaut, Nase, beide Ohren und Hals |
+| Textur | gespiegeltes 2×2-Raster |
+| Erhaltungs-Loss | Gewicht 10 außerhalb der Hautmaske |
+| Struktur-Loss | aus |
+| Jobzeitlimit | 48 Stunden inklusive Maskenvorbereitung und Datenkopie |
+| Sicherung | latest.pt jede Epoche, zusätzlicher Checkpoint alle 10 Epochen |
+
+Das Jobzeitlimit ist ein Budget, keine gemessene Laufzeitprognose.
+Die [Clusterdokumentation](https://wiki.bwhpc.de/e/BwUniCluster3.0/Running_Jobs)
+erlaubt bis zu 72 Stunden in `gpu_h100`.
+
+Die erweiterten Masken werden in `train/masks_A_skin_ears_neck` und
+`test/masks_A_skin_ears_neck` neu berechnet. Alte `masks_A`-Ordner werden weder
+überschrieben noch für diesen Lauf geladen. Die SegFormer-Klassen umfassen keine
+allgemeine Körperhaut: Hände und Arme werden damit nicht zuverlässig erfasst.
+Auch Ohrringe und Halsketten sind keine ausgewählten Hautklassen.
+
+Auf dem Cluster im Projektordner:
+
+```bash
+git pull --ff-only
+source .venv/bin/activate
+python -m pip install -r requirements-face-parsing.txt
+mkdir -p logs
+sbatch jobs/train_uc3.sbatch
+```
+
+Die Standardwerte gelten, sofern keine früher exportierten Variablen wie
+`N_EPOCHS`, `N_EPOCHS_DECAY`, `MAX_IMAGES`, `SKIN_LOSS`, `TEXTURE_TILES` oder
+`TRAIN_EXTRA` sie überschreiben. Das Joblog zeigt die verwendeten Werte.
+Mit `MAX_IMAGES=20 N_EPOCHS=1 N_EPOCHS_DECAY=0 RUN=skin_ears_neck_smoke`
+lässt sich weiterhin ein Kurztest starten.
+
+Ein abgebrochener **voller Lauf mit derselben Konfiguration** wird so fortgesetzt:
+
+```bash
+RESUME=1 sbatch jobs/train_uc3.sbatch
+```
+
+Der alte 20-Epochen-Lauf wird nicht überschrieben oder als Startpunkt verwendet.
+Ein existierender Checkpoint unter dem neuen Laufnamen verhindert einen
+versehentlichen Neustart ohne `RESUME=1`.

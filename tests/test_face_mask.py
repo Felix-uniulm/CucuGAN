@@ -9,11 +9,28 @@ import torch
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from face_mask import skin_alpha
+from face_mask import skin_alpha, skin_class_ids
 from infer import convert_image
 
 
 class FaceMaskTests(unittest.TestCase):
+    def test_extended_skin_classes(self):
+        names = ['background', 'skin', 'nose', 'eye_g', 'l_eye', 'r_eye',
+                 'l_brow', 'r_brow', 'l_ear', 'r_ear', 'mouth', 'u_lip',
+                 'l_lip', 'hair', 'hat', 'ear_r', 'neck_l', 'neck', 'cloth']
+        ids = skin_class_ids(dict(enumerate(names)))
+        self.assertEqual(ids, [1, 2, 8, 9, 17])
+        labels = torch.arange(19).repeat(19, 1)
+        for radius in (0, 1, 3):
+            mask = skin_alpha(labels, ids, radius)
+            self.assertTrue((mask[:, ids] > 0).all())
+            excluded = [i for i in range(19) if i not in ids]
+            self.assertEqual(mask[:, excluded].count_nonzero().item(), 0)
+
+    def test_missing_neck_is_rejected(self):
+        with self.assertRaises(ValueError):
+            skin_class_ids({1: 'skin', 2: 'nose', 8: 'l_ear', 9: 'r_ear'})
+
     def test_only_skin_and_nose_even_with_feathering(self):
         labels = torch.arange(19).repeat(19, 1)
         for radius in (0, 1, 3):

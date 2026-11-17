@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=cucugan-squares
+#SBATCH --job-name=cucugan-skin-full
 #SBATCH --partition=gpu_h100
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=04:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/%x_%j.out
 
 set -euo pipefail
@@ -19,16 +19,27 @@ source .venv/bin/activate
 WS=$(ws_find cucugan)
 DATA_NAME="${DATA_NAME:-squares128}"
 DATA_PATH="$TMPDIR/$DATA_NAME"
-RUN="${RUN:-baseline_squares_2k}"
-MAX_IMAGES="${MAX_IMAGES:-2000}"
+RUN="${RUN:-skin_ears_neck_tiles2_full}"
+MAX_IMAGES="${MAX_IMAGES:-all}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
 N_EPOCHS="${N_EPOCHS:-100}"
 N_EPOCHS_DECAY="${N_EPOCHS_DECAY:-100}"
 STRUCT_MASK="${STRUCT_MASK:-none}"
-SKIN_LOSS="${SKIN_LOSS:-0}"
-TEXTURE_TILES="${TEXTURE_TILES:-1}"
+SKIN_LOSS="${SKIN_LOSS:-1}"
+TEXTURE_TILES="${TEXTURE_TILES:-2}"
+MASK_FOLDER="${MASK_FOLDER:-masks_A_skin_ears_neck}"
 FACE_MODEL="${FACE_MODEL:-jonathandinu/face-parsing}"
 TRAIN_EXTRA="${TRAIN_EXTRA:-}"
+
+if [[ "$MAX_IMAGES" != "all" && ! "$MAX_IMAGES" =~ ^[1-9][0-9]*$ ]]; then
+    echo "MAX_IMAGES must be 'all' or a positive integer" >&2
+    exit 1
+fi
+
+if [[ "${RESUME:-0}" != "1" && -e "$WS/checkpoints/$RUN/latest.pt" ]]; then
+    echo "Run $RUN already exists. Use RESUME=1 or a new RUN name." >&2
+    exit 1
+fi
 
 mkdir -p logs
 mkdir -p "$WS/checkpoints" "$WS/outputs"
@@ -43,6 +54,7 @@ echo "Max images: $MAX_IMAGES"
 echo "Epochs: $N_EPOCHS + $N_EPOCHS_DECAY decay"
 echo "Structure mask: $STRUCT_MASK"
 echo "Skin loss: $SKIN_LOSS; texture tiles: $TEXTURE_TILES"
+echo "Mask folder: $MASK_FOLDER"
 echo "Extra args: ${TRAIN_EXTRA:-<none>}"
 echo "Start: $(date --iso-8601=seconds)"
 nvidia-smi --query-gpu=name,memory.total --format=csv
@@ -55,6 +67,7 @@ if [[ "$SKIN_LOSS" == "1" ]]; then
         --data "$WS/$DATA_NAME" \
         --device cuda \
         --model "$FACE_MODEL" \
+        --mask-folder "$MASK_FOLDER" \
         --threads "${SLURM_CPUS_PER_TASK:-4}"
 fi
 
@@ -66,7 +79,6 @@ TRAIN_ARGS=(
     src/train.py
     --name "$RUN"
     --data "$DATA_PATH"
-    --max-images "$MAX_IMAGES"
     --n-epochs "$N_EPOCHS"
     --n-epochs-decay "$N_EPOCHS_DECAY"
     --batch-size 1
@@ -76,7 +88,12 @@ TRAIN_ARGS=(
     --save-every "$SAVE_EVERY"
     --struct-mask "$STRUCT_MASK"
     --texture-tiles "$TEXTURE_TILES"
+    --mask-folder "$MASK_FOLDER"
 )
+
+if [[ "$MAX_IMAGES" != "all" ]]; then
+    TRAIN_ARGS+=(--max-images "$MAX_IMAGES")
+fi
 
 if [[ "$SKIN_LOSS" == "1" ]]; then
     TRAIN_ARGS+=(--skin-loss)

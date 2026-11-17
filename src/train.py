@@ -40,6 +40,7 @@ from torchvision.utils import make_grid
 from tqdm import tqdm
 
 from dataset import UnpairedDataset
+from face_mask import MASK_FOLDER
 from models import Discriminator, Generator, init_weights
 from utils import (ImagePool, StructureLoss, linear_decay, masked_l1, sample_grid, save_grid,
                    set_requires_grad)
@@ -65,6 +66,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--struct-mask", choices=("none", "ellipse"), default="none",
                    help="Maske für den Struktur-Loss; ellipse fokussiert auf die Gesichtsmitte")
     p.add_argument("--skin-loss", action="store_true", help="Textur-Loss mit gespeicherten Hautmasken begrenzen")
+    p.add_argument("--mask-folder", default=MASK_FOLDER, help="Maskenordner innerhalb von train/test")
     p.add_argument("--lambda-outside", type=float, default=10.0,
                    help="Erhaltungs-Loss außerhalb der Haut bei --skin-loss; 0 = aus")
     p.add_argument("--texture-tiles", type=int, choices=(1, 2), default=1,
@@ -126,8 +128,10 @@ def main() -> None:
     device = pick_device(args.device)
 
     # --- Daten -------------------------------------------------------------------------
-    train_ds = UnpairedDataset(args.data, "train", args.max_images, args.skin_loss, args.texture_tiles)
-    test_ds = UnpairedDataset(args.data, "test", skin_loss=args.skin_loss, texture_tiles=args.texture_tiles)
+    train_ds = UnpairedDataset(args.data, "train", args.max_images, args.skin_loss,
+                              args.texture_tiles, args.mask_folder)
+    test_ds = UnpairedDataset(args.data, "test", skin_loss=args.skin_loss,
+                             texture_tiles=args.texture_tiles, mask_folder=args.mask_folder)
     with Image.open(train_ds.paths_a[0]) as img:
         cfg["image_size"] = img.width                       # für infer.py im Checkpoint
     loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
@@ -170,6 +174,8 @@ def main() -> None:
                 raise ValueError(f"Resume mit geändertem {key} nicht erlaubt; neuen Laufnamen verwenden")
         if args.skin_loss and ckpt["config"].get("lambda_outside", 0.0) != args.lambda_outside:
             raise ValueError("Resume mit geändertem lambda_outside nicht erlaubt; neuen Laufnamen verwenden")
+        if args.skin_loss and ckpt["config"].get("mask_folder", "masks_A") != args.mask_folder:
+            raise ValueError("Resume mit geändertem Maskenordner nicht erlaubt; neuen Laufnamen verwenden")
         for k, net in nets.items():
             net.load_state_dict(ckpt["nets"][k])
         opt_G.load_state_dict(ckpt["opt_G"])

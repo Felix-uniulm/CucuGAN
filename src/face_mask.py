@@ -6,6 +6,16 @@ from PIL import Image, ImageFilter
 from torch.nn import functional as F
 
 DEFAULT_MODEL = "jonathandinu/face-parsing"
+SKIN_CLASSES = ("skin", "nose", "l_ear", "r_ear", "neck")
+MASK_FOLDER = "masks_A_skin_ears_neck"
+
+
+def skin_class_ids(id2label: dict) -> list[int]:
+    labels = {name.lower(): int(i) for i, name in id2label.items()}
+    missing = set(SKIN_CLASSES) - labels.keys()
+    if missing:
+        raise ValueError(f"Face-Parsing-Modell fehlen Hautklassen: {sorted(missing)}")
+    return [labels[name] for name in SKIN_CLASSES]
 
 
 def skin_alpha(labels: torch.Tensor, skin_ids: list[int], feather: float) -> torch.Tensor:
@@ -37,10 +47,7 @@ class FaceMask:
         self.feather = feather
         self.processor = SegformerImageProcessor.from_pretrained(model)
         self.model = SegformerForSemanticSegmentation.from_pretrained(model).to(device).eval()
-        labels = {name.lower(): int(i) for i, name in self.model.config.id2label.items()}
-        if not {"skin", "nose"} <= labels.keys():
-            raise ValueError("Face-Parsing-Modell muss Klassen 'skin' und 'nose' enthalten")
-        self.skin_ids = [labels["skin"], labels["nose"]]
+        self.skin_ids = skin_class_ids(self.model.config.id2label)
 
     @torch.inference_mode()
     def __call__(self, image: Image.Image) -> torch.Tensor:

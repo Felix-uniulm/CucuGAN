@@ -31,7 +31,7 @@ def list_images(folder: Path) -> list[Path]:
 
 class UnpairedDataset(Dataset):
     def __init__(self, root: str | Path, split: str = "train", max_images: int | None = None,
-                 skin_loss: bool = False, texture_tiles: int = 1):
+                 skin_loss: bool = False, texture_tiles: int = 1, mask_folder: str = "masks_A"):
         folder = Path(root) / split
         # max_images: nur die ersten N Bilder pro Domäne (für den Overfit-Test)
         self.paths_a = list_images(folder / "A")[:max_images]
@@ -39,7 +39,7 @@ class UnpairedDataset(Dataset):
         if not self.paths_a or not self.paths_b:
             raise FileNotFoundError(f"Keine Bilder in {folder}/A oder {folder}/B")
         self.train = split == "train"
-        self.mask_folder = folder / "masks_A"
+        self.mask_folder = folder / mask_folder
         self.skin_loss = skin_loss
         if texture_tiles not in (1, 2):
             raise ValueError("texture_tiles muss 1 oder 2 sein")

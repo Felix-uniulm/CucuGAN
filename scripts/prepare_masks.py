@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from dataset import list_images
-from face_mask import DEFAULT_MODEL, FaceMask
+from face_mask import DEFAULT_MODEL, MASK_FOLDER, SKIN_CLASSES, FaceMask
 from infer import pick_device
 
 
@@ -20,6 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=Path("data/processed/squares128"))
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--mask-folder", default=MASK_FOLDER)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--max-images", type=int, help="Nur für kleine Funktionstests, pro Split")
     parser.add_argument("--threads", type=int, default=4, help="CPU-Threads")
@@ -30,9 +31,9 @@ def main():
     model = None  # Kein Modell laden, wenn bereits alle Masken vorhanden sind.
     failures = []
     for split in ("train", "test"):
-        folder = args.data / split / "masks_A"
+        folder = args.data / split / args.mask_folder
         folder.mkdir(parents=True, exist_ok=True)
-        metadata = {"model": args.model, "classes": ["skin", "nose"], "feather": 0}
+        metadata = {"model": args.model, "classes": list(SKIN_CLASSES), "feather": 0}
         metadata_path = folder / "config.json"
         if metadata_path.exists() and json.loads(metadata_path.read_text()) != metadata:
             raise ValueError(f"Andere Maskenkonfiguration in {folder}; separaten Datensatz verwenden")

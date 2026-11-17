@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
                         help="Ausgabedatei oder Ausgabeordner")
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda oder mps")
     parser.add_argument("--skin-mask", action="store_true",
-                        help="Nur Gesichtshaut und Nase ersetzen (Face Parsing)")
+                        help="Nur Gesichtshaut, Nase, Ohren und Hals ersetzen (Face Parsing)")
     parser.add_argument("--face-model", default="jonathandinu/face-parsing",
                         help="Hugging-Face-Modell-ID oder lokaler Modellordner")
     parser.add_argument("--mask-feather", type=float, default=1.0,
